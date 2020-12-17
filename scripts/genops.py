@@ -35,20 +35,18 @@ class OpcodeList():
 #include "cpu.h"
 #include "instr.h"
 
-#define SUBINSTR_END_LIST (subinstr_t) { \\
-	.opcode = 0x0, \\
-	.cycles = 0, \\
-	.length = 0, \\
-	.mode = MODE_INVALID_ENTRY \\
-}\n
 '''
+        count = 0
         for name, instr in self.instr_list.items():
             res = res + 'subinstr_t ' + instr.get_list_name()
             res = res + '[] = {\n'
+            count = 0
             for subinstr in instr.list:
-                res = res + str(subinstr) + ',\n'
-            res = res + '\tSUBINSTR_END_LIST\n};\n\n'
-        print(res)
+                res = res + str(subinstr) \
+                    + (',\n' if count <= len(instr.list) - 2 else '')
+                count = count + 1
+            res = res + '\n};\n\n'
+        print(res[:-1]) # cheap way to account for the extra newline
 
         res = 'instr_t instr_list[] = {\n'
         count = 0
@@ -96,15 +94,17 @@ class Subinstr():
 
 class Instr():
 
-    def __init__(self, name, list, f=None):
+    def __init__(self, name, list):
         self.name = name
         self.list = list
-        self.f = f
 
         return
 
     def get_list_name(self):
         return '{}_{}'.format(self.name.lower(), 'list' if len(self.list) > 1 else 'single')
+
+    def get_action_name(self):
+        return '{}_action'.format(self.name.lower())
 
     def __str__(self):
         return self.__repr__()
@@ -113,7 +113,8 @@ class Instr():
         res = '\t(instr_t) {'
         res = res + '\n\t\t.name = "{}",'.format(self.name)
         res = res + '\n\t\t.list = {},'.format(self.get_list_name())
-        res = res + '\n\t\t.action = {}'.format(self.f if self.f else 'NULL')
+        res = res + '\n\t\t.size = {},'.format(len(self.list))
+        res = res + '\n\t\t.action = NULL'
         res = res + '\n\t}'
 
         return res

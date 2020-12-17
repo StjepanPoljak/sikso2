@@ -14,13 +14,10 @@ typedef uint8_t status_t;
 #define OPCODE_BYTES 1
 
 #define for_each_instr(i) for (i = get_instr_list(); \
-	i < get_instr_list() + get_instr_list_size(); \
-	i++)
+	i < get_instr_list() + get_instr_list_size(); i++)
 
 #define for_each_subinstr(s, i) for_each_instr(i) \
-	for (s = i->list; \
-	     s->mode != MODE_INVALID_ENTRY; \
-	     s++)
+	for (s = i->list; s < i->list + i->size; s++)
 
 #define INSTR_MAP_SIZE (1 << (OPCODE_BYTES * 8))
 #define DEFINE_INSTR_MAP(m) \
@@ -35,11 +32,11 @@ typedef uint8_t status_t;
 
 /* mode map:
  *  -------------------
- * |  7:6  | 5 |  4:0  |
+ * |  7:5  | 4 |  3:0  |
  *  -------------------
  * 7:5	- reserved
- * 5	- extra cycle
- * 4:0	- instruction mode */
+ * 4	- extra cycle
+ * 3:0	- instruction mode */
 
 /* instruction mode */
 
@@ -59,11 +56,10 @@ typedef uint8_t status_t;
 #define MODE_ZERO_PAGE_Y	0x0D
 #define MODE_INDIRECT		0x0E
 #define MODE_STATUS		0x0F
-#define MODE_INVALID_ENTRY	0x1F
 
 /* add cycle if boundary crossed 0x20000 */
 
-#define MODE_EXTRA_CYCLE	1 << 6
+#define MODE_EXTRA_CYCLE	1 << 5
 
 /* CPU model */
 
@@ -72,7 +68,7 @@ typedef uint8_t status_t;
 typedef uint8_t instr_mode_t;
 typedef uint8_t cpu_model_t;
 typedef uint8_t opcode_t;
-typedef void* user_data_t;
+typedef void*(*action_t)(instr_mode_t, void*);
 
 typedef struct subinstr_t {
 	uint8_t opcode;
@@ -84,8 +80,9 @@ typedef struct subinstr_t {
 
 typedef struct instr_t {
 	char name[3];
-	void(*action)(instr_mode_t, cpu_6502_t*, user_data_t);
+	action_t action;
 	subinstr_t* list;
+	uint8_t size;
 } instr_t;
 
 typedef struct instr_map_t {

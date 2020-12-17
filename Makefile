@@ -12,7 +12,6 @@ endif
 $(proj): $(objs)
 	$(CC) $(objs) -o $@ -lpthread
 
-.PHONY=cpu6502-opcodes.c
 cpu6502-opcodes.c:
 	./scripts/genops.py > $@
 
@@ -25,4 +24,4 @@ run: $(proj)
 
 .PHONY=clean
 clean:
-	rm -rf $(proj) *.o
+	rm -rf $(proj) *.o cpu6502-opcodes.c

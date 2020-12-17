@@ -49,7 +49,11 @@ static void print_mode(instr_mode_t mode) {
 		CASE_MODE(ACCUMULATOR, "Accumulator");
 		CASE_MODE(BRANCH, "Branch");
 		CASE_MODE(IMPLIED, "Implied");
-		CASE_MODE(INVALID_ENTRY, "INVALID");
+		CASE_MODE(STACK, "Stack");
+		CASE_MODE(REGISTER, "Register");
+		CASE_MODE(ZERO_PAGE_Y, "Zero Page, Y");
+		CASE_MODE(INDIRECT, "Indirect");
+		CASE_MODE(STATUS, "Status");
 	}
 
 	return;
