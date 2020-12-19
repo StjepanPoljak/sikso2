@@ -9,14 +9,16 @@ ifeq (,$(wildcard cpu6502-opcodes.c))
 objs += cpu6502-opcodes.o
 endif
 
+CFLAGS := -DTRANSLATOR_TRACE
+
 $(proj): $(objs)
-	$(CC) $(objs) -o $@ -lpthread
+	$(CC) $(CFLAGS) $(objs) -o $@ -lpthread
 
 cpu6502-opcodes.c:
 	./scripts/genops.py > $@
 
 %.o: %.c
-	$(CC) -c $< -o $@
+	$(CC) $(CFLAGS) -c $< -o $@
 
 .PHONY=run
 run: $(proj)
