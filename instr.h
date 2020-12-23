@@ -3,6 +3,7 @@
 
 #include <stdint.h>
 #include <stdlib.h>
+#include <stdbool.h>
 
 #include "cpu.h"
 
@@ -40,22 +41,22 @@ typedef uint8_t status_t;
 
 /* instruction mode */
 
-#define MODE_ZERO_PAGE		0x00
-#define MODE_ZERO_PAGE_X	0x01
-#define MODE_ABSOLUTE		0x02
-#define MODE_ABSOLUTE_X		0x03
-#define MODE_ABSOLUTE_Y		0x04
-#define MODE_INDIRECT_X		0x05
-#define MODE_INDIRECT_Y		0x06
-#define MODE_IMMEDIATE		0x07
-#define MODE_ACCUMULATOR	0x08
-#define MODE_BRANCH		0x09
-#define MODE_IMPLIED		0x0A
-#define MODE_STACK		0x0B
-#define MODE_REGISTER		0x0C
-#define MODE_ZERO_PAGE_Y	0x0D
-#define MODE_INDIRECT		0x0E
-#define MODE_STATUS		0x0F
+#define MODE_ZERO_PAGE		0x0
+#define MODE_ZERO_PAGE_X	0x1
+#define MODE_ABSOLUTE		0x2
+#define MODE_ABSOLUTE_X		0x3
+#define MODE_ABSOLUTE_Y		0x4
+#define MODE_INDIRECT_X		0x5
+#define MODE_INDIRECT_Y		0x6
+#define MODE_IMMEDIATE		0x7
+#define MODE_ACCUMULATOR	0x8
+#define MODE_BRANCH		0x9
+#define MODE_IMPLIED		0xA
+#define MODE_STACK		0xB
+#define MODE_REGISTER		0xC
+#define MODE_ZERO_PAGE_Y	0xD
+#define MODE_INDIRECT		0xE
+#define MODE_STATUS		0xF
 
 /* add cycle if boundary crossed 0x20000 */
 
@@ -94,5 +95,6 @@ status_t populate_imap(instr_map_t*);
 void print_imap(instr_map_t*);
 instr_t* get_instr_list(void);
 size_t get_instr_list_size(void);
+bool get_subinstr(const char[], instr_mode_t, subinstr_t**);
 
 #endif

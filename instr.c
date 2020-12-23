@@ -1,6 +1,7 @@
 #include "instr.h"
 
 #include <stdio.h>
+#include <string.h>
 
 status_t populate_imap(instr_map_t* instr_map) {
 	instr_t* i;
@@ -75,4 +76,32 @@ void print_imap(instr_map_t* instr_map) {
 	}
 
 	return;
+}
+
+bool get_subinstr(const char name[], instr_mode_t mode, subinstr_t** res) {
+	instr_t* i;
+	subinstr_t* s;
+
+	for_each_instr(i) {
+
+		if (!strncmp(name, i->name, 3)) {
+
+			if (i->size == 1) {
+				*res = i->list;
+
+				return true;
+			}
+
+			for (s = i->list; s < i->list + i->size; s++) {
+
+				if (s->mode == mode) {
+					*res = s;
+
+					return true;
+				}
+			}
+		}
+	}
+
+	return false;
 }
