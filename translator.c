@@ -10,6 +10,7 @@
 #include "instr.h"
 
 #define MAX_LINE_SIZE 80
+#define MAX_INSTR_LENGTH 3
 
 #define logt_err(FMT, ...) printf("(!) " FMT "\n", ## __VA_ARGS__)
 
@@ -42,7 +43,8 @@
 
 #define SIN_RE_STR RE_BEGIN INS_RE_STR RE_END
 #define BRA_RE_STR RE_BEGIN INS_RE_STR RE_SEP LBL_RE_STR RE_END
-#define JMP_IND_RE RE_BEGIN INS_RE_STR RE_SEP "(" RE_SEP LBL_RE_STR RE_SEP ")" RE_END
+#define JMP_IND_RE RE_BEGIN INS_RE_STR RE_SEP "(" RE_SEP \
+	LBL_RE_STR RE_SEP ")" RE_END
 
 #define CIN_RE_STR RE_BEGIN INS_RE_STR RE_SEP "\\(" ADR_GEN_RE "\\)" RE_END
 
@@ -94,8 +96,9 @@ extern size_t get_instr_list_size(void);
 struct instr_el_t {
 	char name[4];
 	opcode_t opcode;
-	unsigned int arg;
-	unsigned int addr;
+	uint16_t arg;
+	uint16_t addr;
+	uint8_t length;
 
 	bool labels_pending;
 	struct instr_el_t* next;
@@ -103,7 +106,7 @@ struct instr_el_t {
 
 struct lbl_node_t {
 	char label[MAX_LINE_SIZE];
-	struct instr_el_t* instr;
+	unsigned int addr;
 	struct lbl_node_t* left;
 	struct lbl_node_t* right;
 };
@@ -125,12 +128,17 @@ typedef struct {
 	regex_t iny_re;
 
 	unsigned int load_addr;
-	unsigned int curr_addr;
 	unsigned int zero_page;
 	unsigned int page_size;
 
+	unsigned int curr_addr;
+	unsigned int total_len;
+
 	struct instr_el_t* instr_head;
+	struct instr_el_t* last_instr;
 	struct lbl_node_t* label_pool;
+
+	const char* infile;
 
 } translator_t;
 
@@ -155,6 +163,7 @@ static int translator_init(translator_t* trans) {
 	REGCOMP(iny_re, IND_ADY_RE);
 
 	trans->instr_head = NULL;
+	trans->last_instr = NULL;
 	trans->label_pool = NULL;
 
 	return ret;
@@ -162,7 +171,8 @@ static int translator_init(translator_t* trans) {
 
 /* ========= label operations ========= */
 
-static void lbl_init(struct lbl_node_t* lbl, const char name[MAX_LINE_SIZE], unsigned int name_size) {
+static void lbl_init(struct lbl_node_t* lbl, const char name[MAX_LINE_SIZE],
+		     unsigned int name_size, unsigned int addr) {
 	unsigned int i = 0;
 
 	for (i = 0; i < MAX_LINE_SIZE; i++) {
@@ -176,6 +186,8 @@ static void lbl_init(struct lbl_node_t* lbl, const char name[MAX_LINE_SIZE], uns
 	lbl->left = NULL;
 	lbl->right = NULL;
 
+	lbl->addr = addr;
+
 	return;
 }
 static void free_lbl(struct lbl_node_t* lbl) {
@@ -188,15 +200,14 @@ static void free_lbl(struct lbl_node_t* lbl) {
 }
 
 static bool add_lbl(translator_t* trans, const char name[MAX_LINE_SIZE],
-		    unsigned int name_size, struct instr_el_t* curr_instr) {
+		    unsigned int name_size) {
 	struct lbl_node_t* new_lbl;
 	struct lbl_node_t* curr;
 	int res;
 
 	new_lbl = malloc(sizeof(*new_lbl));
 
-	lbl_init(new_lbl, name, name_size);
-	new_lbl->instr = curr_instr;
+	lbl_init(new_lbl, name, name_size, trans->curr_addr);
 
 	curr = trans->label_pool;
 
@@ -287,6 +298,82 @@ static void deinit_lbl(translator_t* trans) {
 	return;
 }
 
+/* ========= instruction operations ========= */
+
+static void instr_init(struct instr_el_t* iel) {
+	unsigned int i = 0;
+
+	iel->next = NULL;
+	iel->labels_pending = false;
+	iel->length = 0;
+	iel->arg = 0;
+	iel->addr = 0;
+
+	for (i = 0; i < 3; i++)
+		iel->name[i] = 0;
+
+	return;
+}
+
+static struct instr_el_t* add_empty_instr(translator_t* trans) {
+	struct instr_el_t* new_instr;
+
+	ttrace("Allocating memory for the new instruction.");
+
+	new_instr = malloc(sizeof(*new_instr));
+	instr_init(new_instr);
+
+	if (!trans->instr_head) {
+		trans->instr_head = new_instr;
+		trans->last_instr = new_instr;
+
+		return new_instr;
+	}
+
+	trans->last_instr->next = new_instr;
+	trans->last_instr = new_instr;
+
+	return new_instr;
+}
+
+static void update_instr_addr(translator_t* trans, struct instr_el_t* iel,
+			      unsigned int length) {
+	static unsigned int curr_addr = 0;
+
+	if (!curr_addr)
+		curr_addr = trans->load_addr;
+
+	iel->addr = curr_addr;
+
+	curr_addr += length;
+
+	return;
+}
+
+static void set_instr_name(struct instr_el_t* iel, const char* name) {
+	unsigned int i;
+
+	for (i = 0; i < 3; i++)
+		iel->name[i] = name[i];
+
+	return;
+}
+
+static void translate_instr(struct instr_el_t* iel,
+			    uint8_t mcode[MAX_INSTR_LENGTH]) {
+	uint8_t i = 0;
+	unsigned int s = 0; /* shift */
+
+	mcode[0] = (uint8_t)iel->opcode;
+
+	for (i = 1; i < iel->length; i++) {
+		s = ((i - 1) * 8);
+		mcode[i] = (uint8_t)((iel->arg & ((uint16_t)0xFF << s) >> s));
+	}
+
+	return;
+}
+
 static void free_ins(struct instr_el_t* instr) {
 	struct instr_el_t* temp_el;
 
@@ -297,6 +384,8 @@ static void free_ins(struct instr_el_t* instr) {
 
 	return;
 }
+
+/* ========= deinit translator ========= */
 
 static void translator_deinit(translator_t* trans) {
 	struct instr_el_t* curr_ins;
@@ -340,68 +429,6 @@ static void translator_deinit(translator_t* trans) {
 	return;
 }
 
-/* ========= instruction operations ========= */
-
-static void instr_init(struct instr_el_t* iel) {
-	unsigned int i = 0;
-
-	iel->next = NULL;
-	iel->labels_pending = false;
-
-	for (i = 0; i < 3; i++)
-		iel->name[i] = 0;
-
-	return;
-}
-
-static struct instr_el_t* add_empty_instr(translator_t* trans) {
-	struct instr_el_t* curr;
-	struct instr_el_t* new_instr;
-
-	ttrace("Allocating memory for the new instruction.");
-
-	new_instr = malloc(sizeof(*new_instr));
-	instr_init(new_instr);
-
-	curr = trans->instr_head;
-
-	if (!curr) {
-		trans->instr_head = new_instr;
-
-		return new_instr;
-	}
-
-	if (curr->next)
-		while (curr->next) curr = curr->next;
-
-	curr->next = new_instr;
-
-	return new_instr;
-}
-
-static void update_instr_addr(translator_t* trans, struct instr_el_t* iel,
-			      unsigned int length) {
-	static unsigned int curr_addr = 0;
-
-	if (!curr_addr)
-		curr_addr = trans->load_addr;
-
-	iel->addr = curr_addr;
-
-	curr_addr += length;
-
-	return;
-}
-
-static void set_instr_name(struct instr_el_t* iel, const char* name) {
-	unsigned int i = 0;
-
-	for (i = 0; i < 3; i++)
-		iel->name[i] = name[i];
-
-	return;
-}
-
 /* ========= address handling  ========= */
 
 static int get_arg(const char* str) {
@@ -425,11 +452,13 @@ static int get_arg(const char* str) {
 
 #define set_opcode_and_length(s, new_instr, mode) \
 	if (!get_subinstr((new_instr)->name, mode, &s)) { \
-		logt_err("Opcode for %c%c%c not found", instr_name_to_chars(new_instr)); \
+		logt_err("Opcode for %c%c%c not found", \
+			 instr_name_to_chars(new_instr)); \
 		ret = -1; \
 	} \
 	else { \
-		ttracei("Setting opcode for %c%c%c (@%p)", instr_name_to_chars(new_instr), s); \
+		ttracei("Setting opcode for %c%c%c (@%p)", \
+			instr_name_to_chars(new_instr), s); \
 		(new_instr)->opcode = s->opcode; \
 		ret = s->length; \
 	}
@@ -517,11 +546,13 @@ static int handle_arg(translator_t* trans, struct instr_el_t* new_instr,
 
 #define get_last_instr(trans, instr) \
 	instr = (trans)->instr_head; \
-	if (instr) while ((instr)->next) instr = (instr)->next;
+	if (instr) while ((instr)->next) { instr = (instr)->next; }
 
-#define update_addr(trans) \
+#define update_addr_and_length(trans) \
+	new_instr->length = ret; \
 	new_instr->addr = trans->curr_addr; \
-	trans->curr_addr += ret;
+	trans->curr_addr += ret; \
+	trans->total_len += ret;
 
 static int handle_line(translator_t* trans, const char* str,
 		       struct instr_el_t* old_instr) {
@@ -529,13 +560,9 @@ static int handle_line(translator_t* trans, const char* str,
 	unsigned int i;
 	int ret;
 	bool labels_pending;
-	struct instr_el_t* new_instr;
-	struct instr_el_t* last_instr;
+	struct instr_el_t* new_instr = NULL;
 	char match_buff[MAX_LINE_SIZE] = { 0 };
-	subinstr_t* s;
-
-	get_last_instr(trans, last_instr)
-	if (last_instr) labels_pending = last_instr->labels_pending;
+	subinstr_t* s = NULL;
 
 	ret = 0;
 
@@ -547,39 +574,21 @@ static int handle_line(translator_t* trans, const char* str,
 		return ret;
 	}
 
-	if (!labels_pending) {
-		new_instr = add_empty_instr(trans);
-		last_instr = new_instr;
-	}
-
-	else if (old_instr) {
-		new_instr = old_instr;
-		last_instr = old_instr;
-	}
-
 	REGEXEC(lbe_re) {
-
-		if (!labels_pending)
-			last_instr->labels_pending = true;
-
 		get_pmatch_to(match_buff, 1);
 		ttrace("Empty label %s (%ld)", match_buff,
 		       strlen(match_buff));
-		add_lbl(trans, match_buff, strlen(match_buff), new_instr);
+		add_lbl(trans, match_buff, strlen(match_buff));
 		clean_pmatch(match_buff, 1);
 
 		return 0;
 	}
 
 	REGEXEC(lbi_re) {
-
-		if (!labels_pending)
-			last_instr->labels_pending = true;
-
 		get_pmatch_to(match_buff, 1);
 		ttrace("Complex label %s (%ld)", match_buff,
 		       strlen(match_buff));
-		add_lbl(trans, match_buff, strlen(match_buff), new_instr);
+		add_lbl(trans, match_buff, strlen(match_buff));
 		clean_pmatch(match_buff, 1);
 
 		get_pmatch_to(match_buff, 2);
@@ -591,14 +600,14 @@ static int handle_line(translator_t* trans, const char* str,
 		return 0;
 	}
 
-	if (last_instr->labels_pending) {
-		last_instr->labels_pending = false;
-		ttrace("No labels pending after this instruction.");
-	}
+	if (old_instr)
+		new_instr = old_instr;
+	else
+		new_instr = add_empty_instr(trans);
 
 	REGEXEC(cin_re) {
 		get_pmatch_to(match_buff, 1);
-		ttrace("Complex instruction: %s", match_buff);
+		ttrace("Complex instruction: %s (%d - %d)", match_buff, pmatch[1].rm_so, pmatch[1].rm_eo);
 		set_instr_name(new_instr, match_buff);
 		clean_pmatch(match_buff, 1);
 
@@ -608,7 +617,7 @@ static int handle_line(translator_t* trans, const char* str,
 			return ret;
 		clean_pmatch(match_buff, 2);
 
-		update_addr(trans);
+		update_addr_and_length(trans);
 
 		return 0;
 	}
@@ -621,7 +630,7 @@ static int handle_line(translator_t* trans, const char* str,
 
 		set_opcode_and_length(s, new_instr, 0);
 
-		update_addr(trans);
+		update_addr_and_length(trans);
 
 		return ret;
 	}
@@ -639,7 +648,7 @@ static int handle_line(translator_t* trans, const char* str,
 		set_opcode_and_length(s, new_instr, strncmp(new_instr->name, "JMP", 3) ? 0 : MODE_ABSOLUTE);
 		if (ret < 0)
 			return ret;
-		update_addr(trans);
+		update_addr_and_length(trans);
 
 		return 0;
 	}
@@ -651,40 +660,85 @@ static int handle_line(translator_t* trans, const char* str,
 
 static void dump_instr_list(translator_t* trans) {
 	struct instr_el_t* curr;
+	uint8_t mcode[MAX_INSTR_LENGTH] = { 0 };
+	unsigned int mcode_print;
+	uint8_t i;
+
+	ttracei("Dumping instruction list for %s:", trans->infile);
 
 	for_each_instr_el(trans, curr) {
-		ttrace("%.4x: %c%c%c %u", curr->addr, instr_name_to_chars(curr), curr->arg);
+		translate_instr(curr, mcode);
+		mcode_print = 0;
+
+		for (i = 0; i < curr->length; i++) {
+			mcode_print <<= 8;
+			mcode_print |= mcode[i];
+		}
+
+		ttrace("%.4x: %x (%c%c%c %u) (len=%u)", curr->addr, mcode_print,
+		       instr_name_to_chars(curr), curr->arg, curr->length);
 	}
 }
 
 /* ========= translation main ========= */
 
-int translate(const char* filename, unsigned int load_addr,
-	      unsigned int zero_page, unsigned int page_size) {
-	static bool init = 0;
+static void dump_binary(translator_t* trans, uint8_t** out) {
+	struct instr_el_t* curr;
+	unsigned int pos;
+	uint8_t i;
+	uint8_t mcode[MAX_INSTR_LENGTH] = { 0 };
+
+	*out = malloc(trans->total_len);
+	pos = 0;
+
+	memset(*out, 0, trans->total_len);
+
+	for_each_instr_el(trans, curr) {
+		translate_instr(curr, mcode);
+
+		for (i = 0; i < curr->length; i++)
+			(*out)[pos++] = mcode[i];
+	}
+
+	return;
+}
+
+int translate(const char* infile, unsigned int load_addr,
+	      unsigned int zero_page, unsigned int page_size,
+	      int(*op)(unsigned int, const uint8_t*, void*),
+	      void *data) {
 	translator_t trans;
 	int ret, curr, last, i, line;
 	bool reading, entered_comment, started_newl;
 	FILE* f;
 	char line_buffer[MAX_LINE_SIZE] = { 0 };
+	uint8_t *outdata;
+
+	if (!op) {
+		logt_err("No operation on binary has been provided.");
+
+		return -1;
+	}
 
 	ret = 0;
 	trans.load_addr = load_addr;
 	trans.curr_addr = load_addr;
 	trans.zero_page = zero_page;
 	trans.page_size = page_size;
+	trans.total_len = 0;
+	trans.infile = infile;
 
-	if (!init) {
-		ret = translator_init(&trans);
-		if (ret)
-			return ret;
+	ret = translator_init(&trans);
+	if (ret) {
+		logt_err("Could not initialize translator.");
 
-		init = 1;
+		return ret;
 	}
 
-	f = fopen(filename, "r");
+	f = fopen(infile, "r");
 	if (!f) {
-		logt_err("Could not open file %s.", filename);
+		logt_err("Could not open file %s.", infile);
+
 		return -1;
 	}
 
@@ -719,15 +773,12 @@ int translate(const char* filename, unsigned int load_addr,
 				logt_err("Line buffer too small.");
 				ret = -1;
 
-				break;
+				goto exit_translator;
 			}
 
 			if (!entered_comment && curr != '\n' && curr != EOF)
 				line_buffer[last++] = curr;
 		}
-
-		if (ret)
-			break;
 
 		line++;
 
@@ -741,14 +792,22 @@ int translate(const char* filename, unsigned int load_addr,
 			logt_err("Syntax error at line %d: %s",
 				 line, line_buffer);
 
-			break;
+			goto exit_translator;
 		}
 
 		for (i = 0; i <= last; i++)
 			line_buffer[i] = 0;
 	}
 
+#ifdef TRANSLATOR_TRACE
 	dump_instr_list(&trans);
+#endif
+
+	dump_binary(&trans, &outdata);
+	ret = op(trans.total_len, outdata, data);
+	free(outdata);
+
+exit_translator:
 
 	fclose(f);
 

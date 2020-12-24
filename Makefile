@@ -1,4 +1,4 @@
-proj = gitus
+proj = sikso2
 
 ifeq ($(CC),cc)
 	CC = gcc
@@ -9,7 +9,7 @@ ifeq (,$(wildcard cpu6502-opcodes.c))
 objs += cpu6502-opcodes.o
 endif
 
-CFLAGS := -DTRANSLATOR_TRACE
+CFLAGS := -DTRANSLATOR_TRACE -g
 
 $(proj): $(objs)
 	$(CC) $(CFLAGS) $(objs) -o $@ -lpthread
