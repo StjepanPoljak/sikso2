@@ -9,7 +9,7 @@ ifeq (,$(wildcard cpu6502-opcodes.c))
 objs += cpu6502-opcodes.o
 endif
 
-CFLAGS := -DTRANSLATOR_TRACE -g
+CFLAGS := -o3 -DDEVICE_SAFEGUARD=100 -DDEVICE_TRACE -g -DCPU_TRACE
 
 $(proj): $(objs)
 	$(CC) $(CFLAGS) $(objs) -o $@ -lpthread

@@ -9,6 +9,8 @@
 
 #include "instr.h"
 
+#define logt_err(FMT, ...) log_err("[TRA] ", FMT, ## __VA_ARGS__)
+
 #define MAX_LINE_SIZE 80
 #define MAX_INSTR_LENGTH 3
 #define PMATCH_SIZE 3
@@ -17,11 +19,9 @@
 #define TRANS_ERROR_MAYBE_LABEL -1
 #define TRANS_ERROR_LABEL_NOT_FOUND -3
 
-#define logt_err(FMT, ...) printf("(!) " FMT "\n", ## __VA_ARGS__)
-
 #ifdef TRANSLATOR_TRACE
 #define ttrace(FMT, ...) printf("  -> " FMT "\n", ## __VA_ARGS__)
-#define ttracei(FMT, ...) printf("(i) " FMT "\n", ## __VA_ARGS__)
+#define ttracei(FMT, ...) printf("[TRA] (i) " FMT "\n", ## __VA_ARGS__)
 #else
 #define ttrace(FMT, ...) ;
 #define ttracei(FMT, ...) ;
@@ -35,30 +35,16 @@
 #define ADR_FMT_RE "\\$\\([0-9a-fA-F]\\+\\)"
 #define IMM_ADR_RE RE_BEGIN "#" ADR_FMT_RE RE_END
 
+#define LBL_EMP_RE RE_BEGIN "\\([a-zA-Z0-9_]\\+\\):" RE_END
+
+#define INS_RE_STR "\\([a-zA-Z]..\\)"
+#define SIN_RE_STR RE_BEGIN INS_RE_STR RE_END
+#define CIN_RE_STR RE_BEGIN INS_RE_STR RE_SEP "\\(.\\+\\)" RE_END
+
 #define GEN_ADR_RE(REGEX) RE_BEGIN REGEX RE_END
 #define GEN_AXY_RE(REGEX) RE_BEGIN REGEX "\\s*,\\s*\\([XY]\\)" RE_END
 #define IND_ADX_RE(REGEX) RE_BEGIN "(\\s*" REGEX "\\s*,\\s*\\X\\s*)" RE_END
 #define IND_ADY_RE(REGEX) RE_BEGIN "(\\s*" REGEX "\\s*)\\s*,\\s*Y" RE_END
-
-#define LBL_RE_STR "\\([a-zA-Z0-9_]\\+\\)"
-
-#define INS_RE_STR "\\([a-zA-Z]..\\)"
-/*
-#define ADR_GEN_RE "[#\\$0-9a-fA-F()]\\+\\s*,\\?\\s*[XY()]*"
-*/
-
-#define LBL_EMP_RE RE_BEGIN LBL_RE_STR ":" RE_END
-#define LBL_INS_RE RE_BEGIN LBL_RE_STR ":\\(.*\\)$"
-
-#define SIN_RE_STR RE_BEGIN INS_RE_STR RE_END
-
-/*
-#define BRA_RE_STR RE_BEGIN INS_RE_STR RE_SEP LBL_RE_STR RE_END
-#define JMP_IND_RE RE_BEGIN INS_RE_STR RE_SEP "(" RE_SEP \
-	LBL_RE_STR RE_SEP ")" RE_END
-*/
-
-#define CIN_RE_STR RE_BEGIN INS_RE_STR RE_SEP "\\(.\\+\\)" RE_END
 
 #define REGCOMP(VAR, NAME) \
 	do { \
@@ -398,19 +384,47 @@ static void set_instr_name(struct instr_el_t* iel, const char* name) {
 	return;
 }
 
-static void translate_instr(struct instr_el_t* iel,
+static void remove_pending_label(struct instr_el_t* iel) {
+	char* lp;
+
+	lp = iel->label_pending;
+	free(lp);
+	iel->label_pending = NULL;
+
+	return;
+}
+
+static int translate_instr(translator_t* trans, struct instr_el_t* iel,
 			    uint8_t mcode[MAX_INSTR_LENGTH]) {
-	uint8_t i = 0;
-	unsigned int s = 0; /* shift */
+	uint8_t i;
+	unsigned int s; /* shift */
+	int ret;
+
+	s = 0;
+	if (iel->label_pending) {
+
+		ret = get_lbl_addr(trans, iel->label_pending);
+
+		if (ret == TRANS_ERROR_LABEL_NOT_FOUND) {
+			logt_err("Label %s not found!", iel->label_pending);
+
+			return ret;
+		}
+		else {
+			iel->arg = (uint16_t)ret;
+			ttrace("Found label: %s (%.4x).", iel->label_pending, iel->arg);
+			remove_pending_label(iel);
+		}
+	}
 
 	mcode[0] = (uint8_t)iel->opcode;
 
-	for (i = 1; i < iel->length; i++) {
-		s = ((i - 1) * 8);
+	for (i = iel->length - 1; i >= 1; i--) {
+		s = (((iel->length - i) - 1) * 8);
 		mcode[i] = (uint8_t)(((iel->arg & ((uint16_t)0xFF << s)) >> s));
 	}
 
-	return;
+	return 0;
 }
 
 static void free_ins(struct instr_el_t* instr) {
@@ -518,18 +532,24 @@ static int get_arg(translator_t* trans, const char* str) {
 	if (ret == TRANS_ERROR_FAIL) return ret; \
 	else if (ret > 0) new_instr->arg = ret;
 
-#define set_opcode_and_length(s, new_instr, mode) \
-	if (!get_subinstr((new_instr)->name, mode, &s)) { \
-		logt_err("Opcode for %c%c%c not found", \
-			 instr_name_to_chars(new_instr)); \
-		ret = -1; \
-	} \
-	else { \
-		ttrace("Setting opcode for %c%c%c (@%p) (%d)", \
-			instr_name_to_chars(new_instr), s, ret); \
-		(new_instr)->opcode = s->opcode; \
-		ret = s->length; \
+static int get_length_set_opcode(struct instr_el_t* new_instr, instr_mode_t mode) {
+	subinstr_t* s;
+	int ret;
+
+	if (!get_subinstr(new_instr->name, mode, &s)) {
+		logt_err("Opcode for %c%c%c not found",
+			 instr_name_to_chars(new_instr));
+		ret = -1;
 	}
+	else {
+		ttrace("Setting opcode for %c%c%c",
+			instr_name_to_chars(new_instr));
+		new_instr->opcode = s->opcode;
+		ret = s->length;
+	}
+
+	return ret;
+}
 
 #define set_label_pending(new_instr, buff) \
 	ttrace("Setting label of size %lu", strlen(buff)); \
@@ -544,7 +564,6 @@ static int handle_arg(translator_t* trans, struct instr_el_t* new_instr,
 	int ret;
 	char match_buff[MAX_LINE_SIZE] = { 0 };
 	instr_mode_t mode;
-	subinstr_t* s;
 
 	ret = 0;
 
@@ -557,7 +576,7 @@ static int handle_arg(translator_t* trans, struct instr_el_t* new_instr,
 		new_instr->arg = ret;
 		clean_pmatch(match_buff, 1);
 
-		set_opcode_and_length(s, new_instr, MODE_IMMEDIATE);
+		ret = get_length_set_opcode(new_instr, MODE_IMMEDIATE);
 
 		return ret;
 	}
@@ -575,9 +594,9 @@ static int handle_arg(translator_t* trans, struct instr_el_t* new_instr,
 			mode = MODE_ABSOLUTE;
 			set_label_pending(new_instr, match_buff);
 		}
-	
+
 		clean_pmatch(match_buff, 1);
-		set_opcode_and_length(s, new_instr, mode);
+		ret = get_length_set_opcode(new_instr, mode);
 
 		return ret;
 	}
@@ -607,7 +626,7 @@ static int handle_arg(translator_t* trans, struct instr_el_t* new_instr,
 		}
 
 		clean_pmatch(match_buff, 2);
-		set_opcode_and_length(s, new_instr, mode);
+		ret = get_length_set_opcode(new_instr, mode);
 
 		return ret;
 	}
@@ -621,7 +640,7 @@ static int handle_arg(translator_t* trans, struct instr_el_t* new_instr,
 			set_label_pending(new_instr, match_buff);
 		clean_pmatch(match_buff, 1);
 
-		set_opcode_and_length(s, new_instr, mode);
+		ret = get_length_set_opcode(new_instr, mode);
 
 		return ret;
 	}
@@ -634,7 +653,7 @@ static int handle_arg(translator_t* trans, struct instr_el_t* new_instr,
 		if (ret == TRANS_ERROR_MAYBE_LABEL)
 			set_label_pending(new_instr, match_buff);
 		clean_pmatch(match_buff, 1);
-		set_opcode_and_length(s, new_instr, mode);
+		ret = get_length_set_opcode(new_instr, mode);
 
 		return ret;
 	}
@@ -644,16 +663,17 @@ static int handle_arg(translator_t* trans, struct instr_el_t* new_instr,
 
 /* ========= instruction / line handling ========= */
 
-#define get_last_instr(trans, instr) \
-	instr = (trans)->instr_head; \
-	if (instr) while ((instr)->next) { instr = (instr)->next; }
+static void update_addr_and_length(translator_t* trans,
+				   struct instr_el_t* new_instr,
+				   int length) {
+	ttrace("Updating address and length.");
+	new_instr->length = length;
+	new_instr->addr = trans->curr_addr;
+	trans->curr_addr += length;
+	trans->total_len += length;
 
-#define update_addr_and_length(trans) \
-	ttrace("Updating address and length."); \
-	new_instr->length = ret; \
-	new_instr->addr = trans->curr_addr; \
-	trans->curr_addr += ret; \
-	trans->total_len += ret;
+	return;
+}
 
 static int handle_line(translator_t* trans, const char* str) {
 	regmatch_t pmatch[PMATCH_SIZE];
@@ -688,7 +708,8 @@ static int handle_line(translator_t* trans, const char* str) {
 
 	REGEXEC(cin_re) {
 		get_pmatch_to(match_buff, 1);
-		ttrace("Complex instruction: %s (%d - %d)", match_buff, pmatch[1].rm_so, pmatch[1].rm_eo);
+		ttrace("Complex instruction: %s (%d - %d)", match_buff,
+		       pmatch[1].rm_so, pmatch[1].rm_eo);
 		set_instr_name(new_instr, match_buff);
 		clean_pmatch(match_buff, 1);
 
@@ -702,7 +723,7 @@ static int handle_line(translator_t* trans, const char* str) {
 		}
 		clean_pmatch(match_buff, 2);
 
-		update_addr_and_length(trans);
+		update_addr_and_length(trans, new_instr, ret);
 
 		return ret;
 	}
@@ -713,10 +734,10 @@ static int handle_line(translator_t* trans, const char* str) {
 		set_instr_name(new_instr, match_buff);
 		clean_pmatch(match_buff, 1);
 
-		set_opcode_and_length(s, new_instr, 0);
+		ret = get_length_set_opcode(new_instr, 0);
 		if (ret < 0)
 			return ret;
-		update_addr_and_length(trans);
+		update_addr_and_length(trans, new_instr, ret);
 
 		return ret;
 	}
@@ -736,12 +757,7 @@ static void dump_instr_list(translator_t* trans) {
 
 	for_each_instr_el(trans, curr) {
 
-		if (curr->label_pending) {
-			curr->arg = get_lbl_addr(trans, curr->label_pending);
-			ttrace("Label pending: %s (%.4x).", curr->label_pending, curr->arg);
-		}
-
-		translate_instr(curr, mcode);
+		(void)translate_instr(trans, curr, mcode);
 		mcode_print = 0;
 
 		for (i = 0; i < curr->length; i++) {
@@ -770,18 +786,13 @@ static int dump_binary(translator_t* trans, uint8_t** out) {
 
 	for_each_instr_el(trans, curr) {
 
-		if (curr->label_pending) {
-			ret = get_lbl_addr(trans, curr->label_pending);
+		ret = translate_instr(trans, curr, mcode);
+		if (ret) {
+			logt_err("Could not translate instruction.");
+			free(*out);
 
-			if (ret == TRANS_ERROR_LABEL_NOT_FOUND) {
-				logt_err("Label %s not found!",
-					 curr->label_pending);
-
-				return ret;
-			}
+			return ret;
 		}
-
-		translate_instr(curr, mcode);
 
 		for (i = 0; i < curr->length; i++)
 			(*out)[pos++] = mcode[i];
@@ -841,7 +852,7 @@ int translate(const char* infile, unsigned int load_addr,
 
 		while (curr != '\n' && curr != EOF && curr != ':') {
 			curr = fgetc(f);
-		
+
 			if (started_newl && (curr == '\t' || curr == ' '))
 				continue;
 			else

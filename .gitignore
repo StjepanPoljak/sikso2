@@ -1,3 +1,4 @@
 *.o
 sikso2
 a.out
+*.sw*

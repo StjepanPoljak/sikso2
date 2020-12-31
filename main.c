@@ -1,27 +1,50 @@
 #include <stdio.h>
 #include <unistd.h> /* getopt */
+#include <stdbool.h>
 
 #include "translator.h"
-#include "instr.h"
+#include "device.h"
+
+/* ======= run device ======= */
+
+static int main_run_device(unsigned int len, const uint8_t* out, void* data) {
+	struct device_t device;
+	struct cpu_6502_t cpu;
+	int ret;
+
+	printf("(i) Initializing device.\n");
+
+	init_cpu(&cpu, get_instr_list());
+
+	init_device(&device, &cpu, 0x0600, 0x0, 256);
+
+	ret = load_to_ram(&device, 0x0600, out, len);
+
+	run_device(&device);
+
+	return 0;
+}
+
+static int run_action(const char* infile) {
+
+	return translate(infile, 0x0600, 0x0, 256, main_run_device, NULL);
+}
+
+/* ======= debug ======= */
 
 struct translation_data_t {
 	const char *infile;
 	const char *outfile;
 };
 
-void run_cpu(void) {
-	DEFINE_INSTR_MAP(instr_map);
-	populate_imap(instr_map);
-	print_imap(instr_map);
-}
-
-int print_binary(unsigned int len, const uint8_t* out, void* data) {
+static int print_binary(unsigned int len, const uint8_t* out, void* data) {
 	struct translation_data_t* td;
 	unsigned int i, j, cols, rows, end;
 
-	td = (struct translation_data_t*)data;
-
-	printf("(i) Dumping binary translated from %s\n", td->infile);
+	if (data) {
+		td = (struct translation_data_t*)data;
+		printf("(i) Dumping binary translated from %s\n", td->infile);
+	}
 
 	cols = 5;
 	rows = len / cols;
@@ -40,7 +63,9 @@ int print_binary(unsigned int len, const uint8_t* out, void* data) {
 	return 0;
 }
 
-int export_binary(unsigned int len, const uint8_t* out, void* data) {
+/* ======== translation ======= */
+
+static int export_binary(unsigned int len, const uint8_t* out, void* data) {
 	struct translation_data_t* td;
 	int ret;
 	FILE *f;
@@ -81,25 +106,31 @@ static int translate_file(const char* infile, const char* outfile) {
 	td.infile = infile;
 	td.outfile = outfile ?: default_outfile;
 
-	return translate(td.infile, 0, 0, 256, export_binary, &td);
+	return translate(td.infile, 0x0600, 0x0, 256, export_binary, &td);
 }
+
+typedef enum {
+	MAIN_ACTION_TRANSLATE,
+	MAIN_ACTION_RUN,
+	MAIN_ACTION_NONE
+} main_action_t;
 
 int main(int argc, char* const argv[]) {
 	int opt;
 	char* infile;
 	char* outfile;
-	bool do_translate;
+	main_action_t action;
 
 	infile = NULL;
 	outfile = NULL;
-	do_translate = false;
+	action = MAIN_ACTION_NONE;
 
-	while ((opt = getopt(argc, argv, "t:c:o:h")) != -1) {
+	while ((opt = getopt(argc, argv, "r:t:o:h")) != -1) {
 
 		switch (opt) {
 		case 't':
 			infile = optarg;
-			do_translate = true;
+			action = MAIN_ACTION_TRANSLATE;
 
 			break;
 		case 'o':
@@ -111,9 +142,9 @@ int main(int argc, char* const argv[]) {
 			       "test.asm -o test\n\n");
 
 			return 0;
-		case 'c':
+		case 'r':
 			infile = optarg;
-			do_translate = false;
+			action = MAIN_ACTION_RUN;
 
 			break;
 		default:
@@ -130,9 +161,12 @@ int main(int argc, char* const argv[]) {
 
 		return -1;
 	}
-
-	if (do_translate)
+	switch (action) {
+	case MAIN_ACTION_TRANSLATE:
 		return translate_file(infile, outfile);
+	case MAIN_ACTION_RUN:
+		return run_action(infile);
+	}
 
 	return -1;
 }

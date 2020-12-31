@@ -4,8 +4,9 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <stdbool.h>
+#include <stdio.h> /* log_err */
 
-#include "cpu.h"
+#define log_err(PREFIX, FMT, ...) printf(PREFIX " (!) " FMT "\n", ## __VA_ARGS__)
 
 typedef uint8_t status_t;
 
@@ -69,9 +70,8 @@ typedef uint8_t status_t;
 typedef uint8_t instr_mode_t;
 typedef uint8_t cpu_model_t;
 typedef uint8_t opcode_t;
-typedef void*(*action_t)(instr_mode_t, void*);
 
-typedef struct subinstr_t {
+typedef struct {
 	uint8_t opcode;
 	uint8_t cycles;
 	uint8_t length;
@@ -79,7 +79,9 @@ typedef struct subinstr_t {
 	cpu_model_t supported;
 } subinstr_t;
 
-typedef struct instr_t {
+typedef int(*action_t)(subinstr_t*, uint16_t, void*);
+
+typedef struct {
 	char name[3];
 	action_t action;
 	subinstr_t* list;
