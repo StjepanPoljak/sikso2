@@ -4,20 +4,26 @@ ifeq ($(CC),cc)
 	CC = gcc
 endif
 
-objs = $(patsubst %.c,%.o,$(wildcard *.c))
-ifeq (,$(wildcard cpu6502-opcodes.c))
-objs += cpu6502-opcodes.o
+objs = $(subst source,build,$(patsubst %.c,%.o,$(wildcard source/*.c)))
+ifeq (,$(wildcard source/cpu6502-opcodes.c))
+objs += build/cpu6502-opcodes.o
 endif
 
-CFLAGS := -o3 -DDEVICE_SAFEGUARD=100 -DDEVICE_TRACE -g -DCPU_TRACE
+CFLAGS := -Iinclude -o3 -DDEVICE_SAFEGUARD=100 -DDEVICE_TRACE -g -DCPU_TRACE
 
-$(proj): $(objs)
+all: $(proj) build
+
+.PHONY=build
+build:
+	mkdir build
+
+$(proj): build $(objs)
 	$(CC) $(CFLAGS) $(objs) -o $@ -lpthread
 
-cpu6502-opcodes.c:
+source/cpu6502-opcodes.c:
 	./scripts/genops.py > $@
 
-%.o: %.c
+build/%.o: source/%.c
 	$(CC) $(CFLAGS) -c $< -o $@
 
 .PHONY=run
@@ -26,4 +32,4 @@ run: $(proj)
 
 .PHONY=clean
 clean:
-	rm -rf $(proj) *.o cpu6502-opcodes.c
+	rm -rf $(proj) build source/cpu6502-opcodes.c
