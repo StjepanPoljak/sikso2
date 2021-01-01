@@ -5,12 +5,18 @@
 #include "translator.h"
 #include "device.h"
 
+extern void init_cpu_6502_actions(void);
+
 /* ======= run device ======= */
 
 static int main_run_device(unsigned int len, const uint8_t* out, void* data) {
 	struct device_t device;
 	struct cpu_6502_t cpu;
 	int ret;
+
+	printf("(i) Initializing CPU 6502 actions.\n");
+
+	init_cpu_6502_actions();
 
 	printf("(i) Initializing device.\n");
 

@@ -168,7 +168,7 @@ static int get_cycle(struct device_t* device) {
 
 	free(head);
 
-	return device->cycle_head->next ? 0 : DEVICE_NEED_FETCH;
+	return device->cycle_head ? 0 : DEVICE_NEED_FETCH;
 }
 
 static void free_cycle(struct cycle_node_t* cycle) {
@@ -182,22 +182,6 @@ static void free_cycle(struct cycle_node_t* cycle) {
 	return;
 }
 
-int execute(struct device_t* device) {
-	action_t action;
-	instr_map_t* map;
-
-	map = &(device->cpu->instr_map[device->instr_frag.opc]);
-	action = map->instr->action;
-
-	if (!action) {
-		logd_err("No action for opcode %.2x", device->instr_frag.opc);
-
-		return DEVICE_NO_ACTION;
-	}
-
-	return action(map->subinstr, device->instr_frag.arg, device->data);
-}
-
 int fetch_arg(struct device_t* device) {
 	uint8_t byte;
 	int ret;
@@ -208,8 +192,11 @@ int fetch_arg(struct device_t* device) {
 	address = device->cpu->PC;
 	ret = fetch(device, &byte);
 
-	if (!device->instr_frag.pending)
+	if (!device->instr_frag.pending) {
+		logd_err("No instruction pending while fetching arg.");
+
 		return DEVICE_INTERNAL_BUG;
+	}
 
 	device->instr_frag.arg <<= 8;
 	device->instr_frag.arg |= byte;
@@ -222,9 +209,45 @@ int fetch_arg(struct device_t* device) {
 	return ret;
 }
 
+int execute(struct device_t* device) {
+	action_t action;
+	instr_map_t* map;
+	int ret;
+
+	map = &(device->cpu->instr_map[device->instr_frag.opc]);
+	action = map->instr->action;
+
+	ret = fetch_arg(device);
+
+	if (ret)
+		return ret;
+
+	dtracei("Executing %.2x (%x)", device->instr_frag.opc,
+		device->instr_frag.arg);
+
+	if (!action) {
+		logd_err("No action for opcode %.2x", device->instr_frag.opc);
+
+		return DEVICE_NO_ACTION;
+	}
+
+	ret = action(map->subinstr, device->instr_frag.arg, (void*)device);
+
+	device->instr_frag.pending = false;
+
+#ifdef CPU_TRACE
+	dump_cpu(device->cpu);
+#endif
+
+	return ret;
+}
+
+
 int nop(struct device_t* device) {
 
 	(void)device;
+
+	device->cpu->PC++;
 
 	dtracei("NOP");
 
@@ -236,6 +259,9 @@ int nop(struct device_t* device) {
 
 #define instr_cycles(device, opc) \
 	(device)->cpu->instr_map[opc].subinstr->cycles
+
+#define instr_mode(device, opc) \
+	((device)->cpu->instr_map[opc].subinstr->mode & 0xFF)
 
 int fetch_op(struct device_t* device) {
 	uint8_t byte;
@@ -249,15 +275,6 @@ int fetch_op(struct device_t* device) {
 	address = device->cpu->PC;
 	ret = fetch(device, &byte);
 
-	if (!device->cpu->instr_map[byte].instr)
-		return DEVICE_INSTRUCTION_ERROR;
-
-	if (device->instr_frag.pending)
-		return DEVICE_INTERNAL_BUG;
-
-	device->instr_frag.pending = true;
-	device->instr_frag.opc = (opcode_t)byte;
-
 #ifdef DEVICE_TRACE
 	memcpy(name, device->cpu->instr_map[byte].instr->name, 3);
 	dtracei("Fetching instruction at %.4x", address);
@@ -267,7 +284,23 @@ int fetch_op(struct device_t* device) {
 	dtrace("cycles: %d", instr_cycles(device, byte));
 #endif
 
-	for (i = 0; i < instr_length(device, byte); i++)
+	if (!device->cpu->instr_map[byte].instr) {
+		logd_err("Unknown instruction fetched.");
+
+		return DEVICE_INSTRUCTION_ERROR;
+	}
+
+	if (device->instr_frag.pending) {
+		logd_err("Instruction pending while fetching.");
+
+		return DEVICE_INTERNAL_BUG;
+	}
+
+	device->instr_frag.pending = true;
+	device->instr_frag.opc = (opcode_t)byte;
+	device->instr_frag.arg = 0x0;
+
+	for (i = 1; i < instr_length(device, byte) - 1; i++)
 		push_cycle(device, fetch_arg);
 
 	for (i = instr_length(device, byte);
@@ -287,7 +320,7 @@ int run_device(struct device_t* device) {
 
 	ret = 0;
 
-	#ifdef DEVICE_SAFEGUARD
+#ifdef DEVICE_SAFEGUARD
 	safeguard = DEVICE_SAFEGUARD;
 #endif
 	if (!device->cpu) {

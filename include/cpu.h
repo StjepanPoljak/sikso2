@@ -21,6 +21,12 @@ typedef struct cpu_6502_t {
 	instr_map_t* instr_map;
 } cpu_6502_t;
 
+#define set_Z(cpu) (cpu)->P |= 0x2
+#define clr_Z(cpu) (cpu)->P = (cpu)->P & ~((uint8_t)0x2)
+
+#define set_N(cpu) (cpu)->P |= 0x80
+#define clr_N(cpu) (cpu)->P = (cpu)->P & ~((uint8_t)0x80)
+
 void init_cpu(struct cpu_6502_t* cpu, instr_t* instr_list);
 void start_cpu(struct cpu_6502_t* cpu, uint16_t zero_page,
 	       uint16_t page_size, uint16_t load_addr);
