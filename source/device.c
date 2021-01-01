@@ -21,6 +21,8 @@
 #define DEVICE_PERIPHERAL_READ_ERROR -3
 #define DEVICE_INSTRUCTION_ERROR -4
 #define DEVICE_NO_CPU_ERROR -5
+#define DEVICE_INTERNAL_BUG -6
+#define DEVICE_NO_ACTION -7
 
 void init_device(struct device_t* device, struct cpu_6502_t* cpu,
 		 uint16_t load_addr, uint16_t zero_page,
@@ -31,10 +33,11 @@ void init_device(struct device_t* device, struct cpu_6502_t* cpu,
 	device->peripherals = NULL;
 	device->num_of_peripherals = 0;
 	device->cycle_head = NULL;
+	device->run_device = NULL;
+	device->instr_frag.pending = false;
+	device->data = NULL;
 	device->ram.zero_page = zero_page;
 	device->ram.page_size = page_size;
-	device->run_device = NULL;
-	device->data = NULL;
 
 	for (unsigned int i = zero_page; i < 65526 - zero_page; i++)
 		device->ram.ram[i] = 0x87;
@@ -133,6 +136,7 @@ static void push_cycle(struct device_t* device, cycle_action_t action) {
 		device->cycle_head = device->cycle_last;
 	}
 	else {
+		newc->next = NULL;
 		device->cycle_last->next = newc;
 		device->cycle_last = newc;
 	}
@@ -140,8 +144,7 @@ static void push_cycle(struct device_t* device, cycle_action_t action) {
 	return;
 }
 
-static int pop_cycle(struct device_t* device) {
-	struct cycle_node_t* next;
+static int get_cycle(struct device_t* device) {
 	struct cycle_node_t* head;
 	int ret;
 
@@ -150,24 +153,22 @@ static int pop_cycle(struct device_t* device) {
 	if (!device->cycle_head)
 		return DEVICE_NEED_FETCH;
 
+	ret = device->cycle_head->action(device);
+	if (ret < 0)
+		return ret;
+
 	head = device->cycle_head;
-	next = head->next;
-
-	ret = head->action(device);
-	if (ret)
-		return DEVICE_INSTRUCTION_ERROR;
-
-	free(head);
 
 	if (device->cycle_last == device->cycle_head) {
 		device->cycle_head = NULL;
 		device->cycle_last = NULL;
 	}
 	else
-		device->cycle_head = next;
+		device->cycle_head = device->cycle_head->next;
 
+	free(head);
 
-	return next ? 0 : DEVICE_NEED_FETCH;
+	return device->cycle_head->next ? 0 : DEVICE_NEED_FETCH;
 }
 
 static void free_cycle(struct cycle_node_t* cycle) {
@@ -181,18 +182,65 @@ static void free_cycle(struct cycle_node_t* cycle) {
 	return;
 }
 
-int execute(struct device_t* device, instr_frag_t* inf, void* data) {
-	action_t* action;
+int execute(struct device_t* device) {
+	action_t action;
 	instr_map_t* map;
 
-	map = &(device->cpu->instr_map[inf->opc]);
+	map = &(device->cpu->instr_map[device->instr_frag.opc]);
+	action = map->instr->action;
 
-	return map->instr->action(map->subinstr, inf->arg, data);
+	if (!action) {
+		logd_err("No action for opcode %.2x", device->instr_frag.opc);
+
+		return DEVICE_NO_ACTION;
+	}
+
+	return action(map->subinstr, device->instr_frag.arg, device->data);
 }
+
+int fetch_arg(struct device_t* device) {
+	uint8_t byte;
+	int ret;
+#ifdef DEVICE_TRACE
+	uint16_t address;
+#endif
+
+	address = device->cpu->PC;
+	ret = fetch(device, &byte);
+
+	if (!device->instr_frag.pending)
+		return DEVICE_INTERNAL_BUG;
+
+	device->instr_frag.arg <<= 8;
+	device->instr_frag.arg |= byte;
+
+#ifdef DEVICE_TRACE
+	dtracei("Fetching arg fragment at %.4x", address);
+	dtrace("fragment = %.2x", byte);
+#endif
+
+	return ret;
+}
+
+int nop(struct device_t* device) {
+
+	(void)device;
+
+	dtracei("NOP");
+
+	return 0;
+}
+
+#define instr_length(device, opc) \
+	(device)->cpu->instr_map[opc].subinstr->length
+
+#define instr_cycles(device, opc) \
+	(device)->cpu->instr_map[opc].subinstr->cycles
 
 int fetch_op(struct device_t* device) {
 	uint8_t byte;
 	int ret;
+	unsigned int i;
 #ifdef DEVICE_TRACE
 	uint16_t address;
 	char name[4] = { 0 };
@@ -204,23 +252,31 @@ int fetch_op(struct device_t* device) {
 	if (!device->cpu->instr_map[byte].instr)
 		return DEVICE_INSTRUCTION_ERROR;
 
+	if (device->instr_frag.pending)
+		return DEVICE_INTERNAL_BUG;
+
+	device->instr_frag.pending = true;
+	device->instr_frag.opc = (opcode_t)byte;
+
 #ifdef DEVICE_TRACE
 	memcpy(name, device->cpu->instr_map[byte].instr->name, 3);
 	dtracei("Fetching instruction at %.4x", address);
 	dtrace("opcode: %.2x", byte);
 	dtrace("name: %s", name);
-	dtrace("length: %d", device->cpu->instr_map[byte].subinstr->length);
-	dtrace("cycles: %d", device->cpu->instr_map[byte].subinstr->cycles);
+	dtrace("length: %d", instr_length(device, byte));
+	dtrace("cycles: %d", instr_cycles(device, byte));
 #endif
 
+	for (i = 0; i < instr_length(device, byte); i++)
+		push_cycle(device, fetch_arg);
+
+	for (i = instr_length(device, byte);
+	     i < instr_cycles(device, byte) - 1; i++)
+		push_cycle(device, nop);
+
+	push_cycle(device, execute);
+
 	return ret;
-}
-
-int nop(struct device_t* device) {
-
-	(void)device;
-
-	return true;
 }
 
 int run_device(struct device_t* device) {
@@ -243,16 +299,11 @@ int run_device(struct device_t* device) {
 	start_cpu(device->cpu, device->ram.zero_page,
 		  device->ram.page_size, device->load_addr);
 
-	while ((!ret) || (ret != DEVICE_INSTRUCTION_ERROR)) {
-		ret = pop_cycle(device);
+	while (ret >= 0) {
+		ret = get_cycle(device);
 
 		if (ret == DEVICE_NEED_FETCH)
 			push_cycle(device, fetch_op);
-		else {
-			logd_err("Cycle execution returned %d", ret);
-
-			goto exit_run_device;
-		}
 
 #ifdef DEVICE_SAFEGUARD
 		if (!(--safeguard))
@@ -260,7 +311,11 @@ int run_device(struct device_t* device) {
 #endif
 	}
 
-exit_run_device:
+	if (ret < 0)
+		logd_err("Cycle execution returned %d", ret);
+	else
+		dtracei("Return value: %d", ret);
+
 	free_device(device);
 
 	return ret;

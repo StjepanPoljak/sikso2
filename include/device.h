@@ -15,6 +15,7 @@ typedef struct {
 typedef struct {
 	opcode_t opc;
 	uint16_t arg;
+	bool pending;
 } instr_frag_t;
 
 struct peripheral_t {
@@ -33,6 +34,7 @@ struct device_t {
 	bool(*run_device)(struct device_t* device);
 	struct cycle_node_t* cycle_head;
 	struct cycle_node_t* cycle_last;
+	instr_frag_t instr_frag;
 	void* data;
 	ram_t ram;
 };
