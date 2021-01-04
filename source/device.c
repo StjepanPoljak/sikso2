@@ -15,36 +15,6 @@
 #define dtracei(FMT, ...) ;
 #endif
 
-#define DEVICE_NEED_FETCH 1
-#define DEVICE_INVALID_ADDR -1
-#define DEVICE_PERIPHERAL_WRITE_ERROR -2
-#define DEVICE_PERIPHERAL_READ_ERROR -3
-#define DEVICE_INSTRUCTION_ERROR -4
-#define DEVICE_NO_CPU_ERROR -5
-#define DEVICE_INTERNAL_BUG -6
-#define DEVICE_NO_ACTION -7
-
-void init_device(struct device_t* device, struct cpu_6502_t* cpu,
-		 uint16_t load_addr, uint16_t zero_page,
-		 uint16_t page_size) {
-
-	device->cpu = cpu;
-	device->load_addr = load_addr;
-	device->peripherals = NULL;
-	device->num_of_peripherals = 0;
-	device->cycle_head = NULL;
-	device->run_device = NULL;
-	device->instr_frag.pending = false;
-	device->data = NULL;
-	device->ram.zero_page = zero_page;
-	device->ram.page_size = page_size;
-
-	for (unsigned int i = zero_page; i < 65526 - zero_page; i++)
-		device->ram.ram[i] = 0x87;
-
-	return;
-}
-
 static bool in_peripheral_addr(struct peripheral_t* peripheral, uint16_t addr) {
 
 	return (addr >= peripheral->addr_start)
@@ -97,6 +67,29 @@ static int read_byte(struct device_t* device, uint16_t addr, uint8_t* byte) {
 	*byte = device->ram.ram[addr];
 
 	return 0;
+}
+
+void init_device(struct device_t* device, struct cpu_6502_t* cpu,
+		 uint16_t load_addr, uint16_t zero_page,
+		 uint16_t page_size) {
+
+	device->cpu = cpu;
+	device->load_addr = load_addr;
+	device->peripherals = NULL;
+	device->num_of_peripherals = 0;
+	device->cycle_head = NULL;
+	device->run_device = NULL;
+	device->instr_frag.pending = false;
+	device->data = NULL;
+	device->read = read_byte;
+	device->write = write_byte;
+	device->ram.zero_page = zero_page;
+	device->ram.page_size = page_size;
+
+	for (unsigned int i = zero_page; i < 65526 - zero_page; i++)
+		device->ram.ram[i] = 0x87;
+
+	return;
 }
 
 static int fetch(struct device_t* device, uint8_t* byte) {
@@ -156,6 +149,8 @@ static int get_cycle(struct device_t* device) {
 	ret = device->cycle_head->action(device);
 	if (ret < 0)
 		return ret;
+
+	device->instr_frag.ncyc++;
 
 	head = device->cycle_head;
 
@@ -217,10 +212,11 @@ int execute(struct device_t* device) {
 	map = &(device->cpu->instr_map[device->instr_frag.opc]);
 	action = map->instr->action;
 
-	ret = fetch_arg(device);
-
-	if (ret)
-		return ret;
+	if (!device->instr_frag.skiparg) {
+		ret = fetch_arg(device);
+		if (ret)
+			return ret;
+	}
 
 	dtracei("Executing %.2x (%x)", device->instr_frag.opc,
 		device->instr_frag.arg);
@@ -234,6 +230,8 @@ int execute(struct device_t* device) {
 	ret = action(map->subinstr, device->instr_frag.arg, (void*)device);
 
 	device->instr_frag.pending = false;
+
+	dtrace("Execution took %d cycles (%d%s).", device->instr_frag.ncyc + 1, map->subinstr->cycles, map->subinstr->mode & MODE_EXTRA_CYCLE ? "+" : "");
 
 #ifdef CPU_TRACE
 	dump_cpu(device->cpu);
@@ -296,16 +294,24 @@ int fetch_op(struct device_t* device) {
 		return DEVICE_INTERNAL_BUG;
 	}
 
-	device->instr_frag.pending = true;
 	device->instr_frag.opc = (opcode_t)byte;
 	device->instr_frag.arg = 0x0;
+	device->instr_frag.skiparg = instr_length(device, byte) <= 1;
+	device->instr_frag.pending = true;
+	device->instr_frag.ncyc = 0;
 
-	for (i = 1; i < instr_length(device, byte) - 1; i++)
-		push_cycle(device, fetch_arg);
+	if (!device->instr_frag.skiparg) {
 
-	for (i = instr_length(device, byte);
-	     i < instr_cycles(device, byte) - 1; i++)
-		push_cycle(device, nop);
+		for (i = 1; i < instr_length(device, byte) - 1; i++)
+			push_cycle(device, fetch_arg);
+	}
+
+	if (instr_cycles(device, byte) > 1) {
+
+		for (i = instr_length(device, byte);
+		     i < instr_cycles(device, byte) - 1; i++)
+			push_cycle(device, nop);
+	}
 
 	push_cycle(device, execute);
 
@@ -339,8 +345,10 @@ int run_device(struct device_t* device) {
 			push_cycle(device, fetch_op);
 
 #ifdef DEVICE_SAFEGUARD
-		if (!(--safeguard))
+		if (!(--safeguard)) {
+			dtracei("Reached safeguard (%d cycles)!", DEVICE_SAFEGUARD);
 			break;
+		}
 #endif
 	}
 

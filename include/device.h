@@ -6,6 +6,16 @@
 #include <stdint.h>
 #include <stdbool.h>
 
+#define DEVICE_NEED_EXTRA_CYCLE 2
+#define DEVICE_NEED_FETCH 1
+#define DEVICE_INVALID_ADDR -1
+#define DEVICE_PERIPHERAL_WRITE_ERROR -2
+#define DEVICE_PERIPHERAL_READ_ERROR -3
+#define DEVICE_INSTRUCTION_ERROR -4
+#define DEVICE_NO_CPU_ERROR -5
+#define DEVICE_INTERNAL_BUG -6
+#define DEVICE_NO_ACTION -7
+
 typedef struct {
 	uint8_t ram[65536];
 	uint16_t zero_page;
@@ -16,6 +26,8 @@ typedef struct {
 	opcode_t opc;
 	uint16_t arg;
 	bool pending;
+	bool skiparg;
+	uint8_t ncyc;
 } instr_frag_t;
 
 struct peripheral_t {
@@ -36,6 +48,8 @@ struct device_t {
 	struct cycle_node_t* cycle_last;
 	instr_frag_t instr_frag;
 	void* data;
+	int(*read)(struct device_t*, uint16_t, uint8_t*);
+	int(*write)(struct device_t*, uint16_t, uint8_t);
 	ram_t ram;
 };
 

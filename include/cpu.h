@@ -21,11 +21,28 @@ typedef struct cpu_6502_t {
 	instr_map_t* instr_map;
 } cpu_6502_t;
 
-#define set_Z(cpu) (cpu)->P |= 0x2
-#define clr_Z(cpu) (cpu)->P = (cpu)->P & ~((uint8_t)0x2)
+#define set_bit(cpu, bit) \
+	(cpu)->P |= ((uint8_t)1 << bit)
+#define clr_bit(cpu, bit) \
+	(cpu)->P = (cpu)->P & ~((uint8_t)((uint8_t)1 << bit))
+#define get_bit(cpu, bit) \
+	(((cpu)->P & ((uint8_t)1 << bit)) >> bit)
 
-#define set_N(cpu) (cpu)->P |= 0x80
-#define clr_N(cpu) (cpu)->P = (cpu)->P & ~((uint8_t)0x80)
+#define set_C(cpu) set_bit(cpu, 0)
+#define clr_C(cpu) clr_bit(cpu, 0)
+#define get_C(cpu) get_bit(cpu, 0)
+
+#define set_Z(cpu) set_bit(cpu, 1)
+#define clr_Z(cpu) clr_bit(cpu, 1)
+#define get_Z(cpu) get_bit(cpu, 1)
+
+#define set_V(cpu) set_bit(cpu, 6)
+#define clr_V(cpu) clr_bit(cpu, 6)
+#define get_V(cpu) get_bit(cpu, 6)
+
+#define set_N(cpu) set_bit(cpu, 7)
+#define clr_N(cpu) clr_bit(cpu, 7)
+#define get_N(cpu) get_bit(cpu, 7)
 
 void init_cpu(struct cpu_6502_t* cpu, instr_t* instr_list);
 void start_cpu(struct cpu_6502_t* cpu, uint16_t zero_page,
