@@ -9,7 +9,7 @@ ifeq (,$(wildcard source/cpu6502-opcodes.c))
 objs += build/cpu6502-opcodes.o
 endif
 
-CFLAGS := -Iinclude -o3 -g
+CFLAGS := -Iinclude -o3 -g -Wall
 OPTIONS = $(shell sed '/^\s*\#/d' config.txt | awk ' \
 	BEGIN { opts="" } \
 	{ opts = opts (opts == "" ? "" : OFS) "-D" $$0 } \

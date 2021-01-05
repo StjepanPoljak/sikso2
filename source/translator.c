@@ -368,20 +368,6 @@ static struct instr_el_t* add_empty_instr(translator_t* trans) {
 	return new_instr;
 }
 
-static void update_instr_addr(translator_t* trans, struct instr_el_t* iel,
-			      unsigned int length) {
-	static unsigned int curr_addr = 0;
-
-	if (!curr_addr)
-		curr_addr = trans->load_addr;
-
-	iel->addr = curr_addr;
-
-	curr_addr += length;
-
-	return;
-}
-
 static void set_instr_name(struct instr_el_t* iel, const char* name) {
 	unsigned int i;
 
@@ -686,10 +672,8 @@ static int handle_line(translator_t* trans, const char* str) {
 	regmatch_t pmatch[PMATCH_SIZE];
 	unsigned int i;
 	int ret;
-	bool labels_pending;
 	struct instr_el_t* new_instr = NULL;
 	char match_buff[MAX_LINE_SIZE] = { 0 };
-	subinstr_t* s = NULL;
 
 	ret = 0;
 
@@ -767,6 +751,7 @@ static int handle_line(translator_t* trans, const char* str) {
 
 /* ========= debug functions ========= */
 
+#ifdef TRANSLATOR_TRACE
 static void dump_instr_list(translator_t* trans) {
 	struct instr_el_t* curr;
 	uint8_t mcode[MAX_INSTR_LENGTH] = { 0 };
@@ -789,6 +774,7 @@ static void dump_instr_list(translator_t* trans) {
 		       instr_name_to_chars(curr), curr->arg, curr->length);
 	}
 }
+#endif
 
 /* ========= translation main ========= */
 

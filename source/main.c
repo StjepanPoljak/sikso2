@@ -54,6 +54,7 @@ struct translation_data_t {
 	const char *outfile;
 };
 
+#ifdef TRANSLATOR_TRACE
 static int print_binary(unsigned int len, const uint8_t* out, void* data) {
 	struct translation_data_t* td;
 	unsigned int i, j, cols, rows, end;
@@ -79,6 +80,7 @@ static int print_binary(unsigned int len, const uint8_t* out, void* data) {
 
 	return 0;
 }
+#endif
 
 /* ======== translation ======= */
 
@@ -211,6 +213,10 @@ int main(int argc, char* const argv[]) {
 	case MAIN_ACTION_RUN:
 
 		return run_action(infile, &run_settings);
+
+	case MAIN_ACTION_NONE:
+		printf("Nothing to do.\n");
+		break;
 	}
 
 	return -1;

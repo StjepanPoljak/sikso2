@@ -117,18 +117,17 @@ static int get_indX(struct device_t* device, uint16_t addr,
 
 static int get_indY(struct device_t* device, uint16_t addr,
 		    uint16_t* new_addr) {
-	uint8_t zploc;
 	uint8_t low_byte;
 	uint8_t high_byte;
 	int ret;
 
 	ret = 0;
 
-	ret = device->read(device, zploc + 1, &high_byte);
+	ret = device->read(device, addr + 1, &high_byte);
 	if (ret)
 		return ret;
 
-	ret = device->read(device, zploc, &low_byte);
+	ret = device->read(device, addr, &low_byte);
 	if (ret)
 		return ret;
 
@@ -239,7 +238,6 @@ static int write_byte(struct device_t* device, uint16_t addr,
 
 DEFINE_ACTION(ADC) {
 	uint8_t byte;
-	bool overflow;
 	int ret;
 
 	switch (_mode) {
@@ -451,7 +449,6 @@ DEFINE_ACTION(BRK) {
 static int sbc_comm(subinstr_t* s, uint16_t arg, void* data,
 		    bool cmp_only, uint8_t* reg) {
 	uint8_t byte;
-	bool overflow;
 	int ret;
 
 	switch (_mode) {
@@ -663,11 +660,22 @@ static instr_t* instr_named(char name[3]) {
 void init_cpu_6502_actions(void) {
 
 	add_action(ADC);
+	add_action(AND);
 	add_action(ASL);
 	add_action(BIT);
 	add_action(BRK);
 	add_action(CMP);
+	add_action(CPX);
+	add_action(CPY);
 	add_action(DEC);
+	add_action(EOR);
+	add_action(CLC);
+	add_action(SEC);
+	add_action(CLI);
+	add_action(SEI);
+	add_action(CLV);
+	add_action(CLD);
+	add_action(SED);
 	add_action(JMP);
 	add_action(LDA);
 	add_action(NOP);
