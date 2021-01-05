@@ -1,6 +1,5 @@
 #include "cpu.h"
 
-
 #ifdef CPU_TRACE
 #define ctrace(FMT, ...) printf("  -> " FMT "\n", ## __VA_ARGS__)
 #define ctracei(FMT, ...) printf("[CPU] (i) " FMT "\n", ## __VA_ARGS__)
@@ -22,7 +21,7 @@ void init_cpu(struct cpu_6502_t* cpu, instr_t* instr_list) {
 	cpu->instr_map = instr_map;
 
 #ifdef CPU_TRACE
-	dump_cpu(cpu);
+	dump_cpu(cpu, CPU_DUMP_PRETTY);
 #endif
 
 	return;
@@ -43,9 +42,28 @@ void start_cpu(struct cpu_6502_t* cpu, uint16_t zero_page,
 
 /* ======= debug ======= */
 
-void dump_cpu(struct cpu_6502_t* cpu) {
-	printf("A: %.2x\tX: %.2x\tY: %.2x\n", cpu->A, cpu->X, cpu->Y);
-	printf("S: %.2x\tP: %.2x\tPC: %.4x\n", cpu->S, cpu->P, cpu->PC);
+void dump_cpu(struct cpu_6502_t* cpu, cpu_dump_mode_t mode) {
+
+	switch (mode) {
+	case CPU_DUMP_SIMPLE:
+		printf("%.2x %.2x %.2x %.2x %.2x %.4x\n",
+		       cpu->A, cpu->X, cpu->Y,
+		       cpu->S, cpu->P, cpu->PC);
+		break;
+
+	case CPU_DUMP_ONELINE:
+	case CPU_DUMP_PRETTY:
+		printf("A: %.2x\tX: %.2x\tY: %.2x%c",
+		       cpu->A, cpu->X, cpu->Y,
+		       mode == CPU_DUMP_PRETTY ? '\n' : ' ');
+		printf("S: %.2x\tP: %.2x\tPC: %.4x\n",
+		       cpu->S, cpu->P, cpu->PC);
+		break;
+
+	default:
+		printf("[CPU] (*) Invalid mode (%d) in dump_cpu!", mode);
+		break;
+	}
 
 	return;
 }

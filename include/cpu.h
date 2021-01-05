@@ -21,6 +21,12 @@ typedef struct cpu_6502_t {
 	instr_map_t* instr_map;
 } cpu_6502_t;
 
+typedef enum {
+	CPU_DUMP_SIMPLE,
+	CPU_DUMP_ONELINE,
+	CPU_DUMP_PRETTY
+} cpu_dump_mode_t;
+
 #define set_bit(cpu, bit) \
 	(cpu)->P |= ((uint8_t)1 << bit)
 #define clr_bit(cpu, bit) \
@@ -47,6 +53,6 @@ typedef struct cpu_6502_t {
 void init_cpu(struct cpu_6502_t* cpu, instr_t* instr_list);
 void start_cpu(struct cpu_6502_t* cpu, uint16_t zero_page,
 	       uint16_t page_size, uint16_t load_addr);
-void dump_cpu(struct cpu_6502_t* cpu);
+void dump_cpu(struct cpu_6502_t* cpu, cpu_dump_mode_t mode);
 
 #endif

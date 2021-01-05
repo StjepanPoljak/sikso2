@@ -6,6 +6,9 @@
 #include <stdint.h>
 #include <stdbool.h>
 
+#define DEVICE_TAKE_BRANCH 5
+#define DEVICE_GENERATE_NMI 4
+#define DEVICE_GENERATE_IRQ 3
 #define DEVICE_NEED_EXTRA_CYCLE 2
 #define DEVICE_NEED_FETCH 1
 #define DEVICE_INVALID_ADDR -1
@@ -27,7 +30,10 @@ typedef struct {
 	uint16_t arg;
 	bool pending;
 	bool skiparg;
+	bool extrcyc;
+#ifdef DEVICE_TRACE
 	uint8_t ncyc;
+#endif
 } instr_frag_t;
 
 struct peripheral_t {

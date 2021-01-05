@@ -150,7 +150,9 @@ static int get_cycle(struct device_t* device) {
 	if (ret < 0)
 		return ret;
 
+#ifdef DEVICE_TRACE
 	device->instr_frag.ncyc++;
+#endif
 
 	head = device->cycle_head;
 
@@ -212,7 +214,7 @@ int execute(struct device_t* device) {
 	map = &(device->cpu->instr_map[device->instr_frag.opc]);
 	action = map->instr->action;
 
-	if (!device->instr_frag.skiparg) {
+	if (!device->instr_frag.skiparg && !device->instr_frag.extrcyc) {
 		ret = fetch_arg(device);
 		if (ret)
 			return ret;
@@ -228,18 +230,25 @@ int execute(struct device_t* device) {
 	}
 
 	ret = action(map->subinstr, device->instr_frag.arg, (void*)device);
+	if (ret == DEVICE_NEED_EXTRA_CYCLE) {
+		device->instr_frag.extrcyc = true;
+		push_cycle(device, execute);
+
+		return ret;
+	}
 
 	device->instr_frag.pending = false;
 
+#ifdef DEVICE_TRACE
 	dtrace("Execution took %d cycles (%d%s).", device->instr_frag.ncyc + 1, map->subinstr->cycles, map->subinstr->mode & MODE_EXTRA_CYCLE ? "+" : "");
+#endif
 
 #ifdef CPU_TRACE
-	dump_cpu(device->cpu);
+	dump_cpu(device->cpu, CPU_DUMP_PRETTY);
 #endif
 
 	return ret;
 }
-
 
 int nop(struct device_t* device) {
 
@@ -298,8 +307,10 @@ int fetch_op(struct device_t* device) {
 	device->instr_frag.arg = 0x0;
 	device->instr_frag.skiparg = instr_length(device, byte) <= 1;
 	device->instr_frag.pending = true;
+	device->instr_frag.extrcyc = false;
+#ifdef DEVICE_TRACE
 	device->instr_frag.ncyc = 0;
-
+#endif
 	if (!device->instr_frag.skiparg) {
 
 		for (i = 1; i < instr_length(device, byte) - 1; i++)

@@ -46,6 +46,8 @@
 #define IND_ADX_RE(REGEX) RE_BEGIN "(\\s*" REGEX "\\s*,\\s*\\X\\s*)" RE_END
 #define IND_ADY_RE(REGEX) RE_BEGIN "(\\s*" REGEX "\\s*)\\s*,\\s*Y" RE_END
 
+#define ACC_REGEX RE_BEGIN "\\(ASL\\|LSR\\|ROL\\|ROR\\)" RE_SEP "A" RE_END
+
 #define REGCOMP(VAR, NAME) \
 	do { \
 		ret = regcomp(&(trans->VAR), NAME, REG_NEWLINE); \
@@ -123,6 +125,8 @@ typedef struct {
 
 	regex_t adr_re;
 
+	regex_t acc_re;
+
 	unsigned int load_addr;
 	unsigned int zero_page;
 	unsigned int page_size;
@@ -157,6 +161,8 @@ static int translator_init(translator_t* trans) {
 	REGCOMP(iny_re, IND_ADY_RE("\\(.\\+\\)"));
 
 	REGCOMP(adr_re, RE_BEGIN ADR_FMT_RE RE_END);
+
+	REGCOMP(acc_re, ACC_REGEX);
 
 	trans->instr_head = NULL;
 	trans->last_instr = NULL;
@@ -467,6 +473,8 @@ static void translator_deinit(translator_t* trans) {
 
 	regfree(&(trans->adr_re));
 
+	regfree(&(trans->acc_re));
+
 	if (curr_ins) {
 
 		if (!curr_ins->next)
@@ -706,10 +714,23 @@ static int handle_line(translator_t* trans, const char* str) {
 
 	new_instr = add_empty_instr(trans);
 
+	REGEXEC(acc_re) {
+		get_pmatch_to(match_buff, 1);
+		ttrace("Accumulator operator: %s", match_buff);
+		set_instr_name(new_instr, match_buff);
+		clean_pmatch(match_buff, 1);
+
+		ret = get_length_set_opcode(new_instr, MODE_ACCUMULATOR);
+		if (ret < 0)
+			return ret;
+		update_addr_and_length(trans, new_instr, ret);
+
+		return ret;
+	}
+
 	REGEXEC(cin_re) {
 		get_pmatch_to(match_buff, 1);
-		ttrace("Complex instruction: %s (%d - %d)", match_buff,
-		       pmatch[1].rm_so, pmatch[1].rm_eo);
+		ttrace("Complex instruction: %s", match_buff);
 		set_instr_name(new_instr, match_buff);
 		clean_pmatch(match_buff, 1);
 

@@ -14,6 +14,8 @@ static int main_run_device(unsigned int len, const uint8_t* out, void* data) {
 	struct cpu_6502_t cpu;
 	int ret;
 
+	ret = 0;
+
 	printf("(i) Initializing CPU 6502 actions.\n");
 
 	init_cpu_6502_actions();
@@ -21,14 +23,15 @@ static int main_run_device(unsigned int len, const uint8_t* out, void* data) {
 	printf("(i) Initializing device.\n");
 
 	init_cpu(&cpu, get_instr_list());
-
 	init_device(&device, &cpu, 0x0600, 0x0, 256);
 
 	ret = load_to_ram(&device, 0x0600, out, len);
+	if (ret)
+		return ret;
 
 	run_device(&device);
 
-	return 0;
+	return ret;
 }
 
 static int run_action(const char* infile) {
@@ -134,6 +137,7 @@ int main(int argc, char* const argv[]) {
 	while ((opt = getopt(argc, argv, "r:t:o:h")) != -1) {
 
 		switch (opt) {
+
 		case 't':
 			infile = optarg;
 			action = MAIN_ACTION_TRANSLATE;
@@ -167,10 +171,15 @@ int main(int argc, char* const argv[]) {
 
 		return -1;
 	}
+
 	switch (action) {
+
 	case MAIN_ACTION_TRANSLATE:
+
 		return translate_file(infile, outfile);
+
 	case MAIN_ACTION_RUN:
+
 		return run_action(infile);
 	}
 
