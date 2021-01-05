@@ -6,8 +6,6 @@
 #include <stdbool.h>
 #include <stdio.h> /* log_err */
 
-#define log_err(PREFIX, FMT, ...) printf(PREFIX " (!) " FMT "\n", ## __VA_ARGS__)
-
 typedef uint8_t status_t;
 
 #define STATUS_SUCCESS			0x0

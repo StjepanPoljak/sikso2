@@ -5,8 +5,11 @@
 #include "device.h"
 #include "instr.h"
 #include "cpu.h"
+#include "common.h"
 
-#define loga_err(FMT, ...) log_err("[ACT]", FMT, ## __VA_ARGS__)
+#define ASIG "ACT"
+
+#define loga_err(FMT, ...) log_err(ASIG, FMT, ## __VA_ARGS__)
 
 extern instr_t* get_instr_list(void);
 
@@ -522,6 +525,55 @@ DEFINE_ACTION(DEC) {
 DEFINE_ACTION(EOR) {
 
 	return bitwise_comm(s, arg, data, BITWISE_EOR);
+}
+
+DEFINE_ACTION(CLC) {
+
+	clr_C(_device->cpu);
+
+	return 0;
+}
+
+DEFINE_ACTION(SEC) {
+
+	set_C(_device->cpu);
+
+	return 0;
+}
+
+DEFINE_ACTION(CLI) {
+
+	clr_I(_device->cpu);
+
+	return 0;
+}
+
+DEFINE_ACTION(SEI) {
+
+	set_I(_device->cpu);
+
+	return 0;
+}
+
+DEFINE_ACTION(CLV) {
+
+	clr_V(_device->cpu);
+
+	return 0;
+}
+
+DEFINE_ACTION(CLD) {
+
+	clr_D(_device->cpu);
+
+	return 0;
+}
+
+DEFINE_ACTION(SED) {
+
+	set_D(_device->cpu);
+
+	return 0;
 }
 
 DEFINE_ACTION(LDA) {

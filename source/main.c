@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include <unistd.h> /* getopt */
+#include <getopt.h>
 #include <stdbool.h>
 
 #include "translator.h"
@@ -8,6 +9,13 @@
 extern void init_cpu_6502_actions(void);
 
 /* ======= run device ======= */
+
+typedef struct {
+	uint16_t load_addr;
+	uint16_t zero_page;
+	uint16_t page_size;
+	bool end_on_final_instr;
+} run_settings_t;
 
 static int main_run_device(unsigned int len, const uint8_t* out, void* data) {
 	struct device_t device;
@@ -29,14 +37,14 @@ static int main_run_device(unsigned int len, const uint8_t* out, void* data) {
 	if (ret)
 		return ret;
 
-	run_device(&device);
+	run_device(&device, ((run_settings_t*)data)->end_on_final_instr);
 
 	return ret;
 }
 
-static int run_action(const char* infile) {
+static int run_action(const char* infile, run_settings_t* run_settings) {
 
-	return translate(infile, 0x0600, 0x0, 256, main_run_device, NULL);
+	return translate(infile, 0x0600, 0x0, 256, main_run_device, (void*)run_settings);
 }
 
 /* ======= debug ======= */
@@ -124,17 +132,35 @@ typedef enum {
 	MAIN_ACTION_NONE
 } main_action_t;
 
+static struct option long_options[] = {
+	{ "run",	required_argument,	0, 'r' },
+	{ "zero-page",	required_argument,	0, 'z' },
+	{ "page-size",	required_argument,	0, 'p' },
+	{ "load-addr",	required_argument,	0, 'a' },
+	{ "stop",	no_argument,		0, 's' },
+	{ "dump-cpu",	no_argument,		0, 'd' },
+	{ "dump-mem",	required_argument,	0, 'm' },
+	{ "translate",	required_argument,	0, 't' },
+	{ "output",	required_argument,	0, 'o' },
+	{ "help",	required_argument,	0, 'h' },
+	{ 0,		0,			0,  0  }
+};
+
 int main(int argc, char* const argv[]) {
 	int opt;
 	char* infile;
 	char* outfile;
 	main_action_t action;
+	run_settings_t run_settings;
+	int option_index = 0;
 
 	infile = NULL;
 	outfile = NULL;
 	action = MAIN_ACTION_NONE;
 
-	while ((opt = getopt(argc, argv, "r:t:o:h")) != -1) {
+	run_settings.end_on_final_instr = false;
+
+	while ((opt = getopt_long(argc, argv, "r:st:o:h", long_options, &option_index)) != -1) {
 
 		switch (opt) {
 
@@ -155,6 +181,10 @@ int main(int argc, char* const argv[]) {
 		case 'r':
 			infile = optarg;
 			action = MAIN_ACTION_RUN;
+
+			break;
+		case 's':
+			run_settings.end_on_final_instr = true;
 
 			break;
 		default:
@@ -180,7 +210,7 @@ int main(int argc, char* const argv[]) {
 
 	case MAIN_ACTION_RUN:
 
-		return run_action(infile);
+		return run_action(infile, &run_settings);
 	}
 
 	return -1;

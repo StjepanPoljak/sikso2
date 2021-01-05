@@ -1,8 +1,12 @@
 #include "cpu.h"
 
+#include "common.h"
+
+#define CSIG "CPU"
+
 #ifdef CPU_TRACE
-#define ctrace(FMT, ...) printf("  -> " FMT "\n", ## __VA_ARGS__)
-#define ctracei(FMT, ...) printf("[CPU] (i) " FMT "\n", ## __VA_ARGS__)
+#define ctrace(FMT, ...) trace(FMT, ## __VA_ARGS__)
+#define ctracei(FMT, ...) tracei(CSIG, FMT, ## __VA_ARGS__)
 #else
 #define ctrace(FMT, ...) ;
 #define ctracei(FMT, ...) ;

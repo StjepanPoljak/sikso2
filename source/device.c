@@ -2,18 +2,23 @@
 
 #include "instr.h"
 #include "cpu.h"
+#include "common.h"
 
 #include <string.h> /* memcpy */
 
-#define logd_err(FMT, ...) log_err("[DEV]", FMT, ## __VA_ARGS__)
+#define DSIG "DEV"
+
+#define logd_err(FMT, ...) log_err(DSIG, FMT, ## __VA_ARGS__)
 
 #ifdef DEVICE_TRACE
-#define dtrace(FMT, ...) printf("  -> " FMT "\n", ## __VA_ARGS__)
-#define dtracei(FMT, ...) printf("[DEV] (i) " FMT "\n", ## __VA_ARGS__)
+#define dtrace(FMT, ...) trace(FMT, ## __VA_ARGS__)
+#define dtracei(FMT, ...) tracei(DSIG, FMT, ## __VA_ARGS__)
 #else
 #define dtrace(FMT, ...) ;
 #define dtracei(FMT, ...) ;
 #endif
+
+static uint16_t end_instr = 0;
 
 static bool in_peripheral_addr(struct peripheral_t* peripheral, uint16_t addr) {
 
@@ -69,6 +74,17 @@ static int read_byte(struct device_t* device, uint16_t addr, uint8_t* byte) {
 	return 0;
 }
 
+void fill_ram(struct device_t* device, uint8_t byte) {
+	unsigned int i;
+
+	for (i = device->ram.zero_page;
+	     i < 65536 - device->ram.zero_page;
+	     i++)
+		device->ram.ram[i] = byte;
+
+	return;
+}
+
 void init_device(struct device_t* device, struct cpu_6502_t* cpu,
 		 uint16_t load_addr, uint16_t zero_page,
 		 uint16_t page_size) {
@@ -85,9 +101,6 @@ void init_device(struct device_t* device, struct cpu_6502_t* cpu,
 	device->write = write_byte;
 	device->ram.zero_page = zero_page;
 	device->ram.page_size = page_size;
-
-	for (unsigned int i = zero_page; i < 65526 - zero_page; i++)
-		device->ram.ram[i] = 0x87;
 
 	return;
 }
@@ -110,6 +123,8 @@ int load_to_ram(struct device_t* device, uint16_t load_addr,
 			return ret;
 		}
 	}
+
+	end_instr = (uint16_t)data_size + load_addr;
 
 	return 0;
 }
@@ -184,9 +199,9 @@ int fetch_arg(struct device_t* device) {
 	int ret;
 #ifdef DEVICE_TRACE
 	uint16_t address;
-#endif
 
 	address = device->cpu->PC;
+#endif
 	ret = fetch(device, &byte);
 
 	if (!device->instr_frag.pending) {
@@ -277,9 +292,9 @@ int fetch_op(struct device_t* device) {
 #ifdef DEVICE_TRACE
 	uint16_t address;
 	char name[4] = { 0 };
-#endif
 
 	address = device->cpu->PC;
+#endif
 	ret = fetch(device, &byte);
 
 #ifdef DEVICE_TRACE
@@ -329,13 +344,16 @@ int fetch_op(struct device_t* device) {
 	return ret;
 }
 
-int run_device(struct device_t* device) {
+int run_device(struct device_t* device, bool end_on_last_instr) {
 	int ret;
 #ifdef DEVICE_SAFEGUARD
 	int safeguard;
 #endif
 
 	ret = 0;
+
+	if (end_on_last_instr)
+		dtracei("Ending on %.4x", end_instr);
 
 #ifdef DEVICE_SAFEGUARD
 	safeguard = DEVICE_SAFEGUARD;
@@ -350,6 +368,13 @@ int run_device(struct device_t* device) {
 		  device->ram.page_size, device->load_addr);
 
 	while (ret >= 0) {
+
+		if (end_on_last_instr && (device->cpu->PC == end_instr)) {
+			dtracei("Reached last instruction "
+				"(PC=%.4x)", device->cpu->PC);
+			break;
+		}
+
 		ret = get_cycle(device);
 
 		if (ret == DEVICE_NEED_FETCH)

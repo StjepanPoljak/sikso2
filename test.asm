@@ -7,4 +7,4 @@ _start:
 	LDA #$11
 	ADC $0e
 _end:	NOP ; test label
-	JMP _end
+	;JMP _end

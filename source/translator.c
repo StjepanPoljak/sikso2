@@ -2,14 +2,15 @@
 
 #include <regex.h>
 #include <stdbool.h>
-#include <stdlib.h> /* strtol */
 #include <stdio.h>
-#include <errno.h>
 #include <string.h> /* strerror */
 
 #include "instr.h"
+#include "common.h"
 
-#define logt_err(FMT, ...) log_err("[TRA] ", FMT, ## __VA_ARGS__)
+#define TSIG "TRA"
+
+#define logt_err(FMT, ...) log_err(TSIG, FMT, ## __VA_ARGS__)
 
 #define MAX_LINE_SIZE 80
 #define MAX_INSTR_LENGTH 3
@@ -20,8 +21,8 @@
 #define TRANS_ERROR_LABEL_NOT_FOUND -3
 
 #ifdef TRANSLATOR_TRACE
-#define ttrace(FMT, ...) printf("  -> " FMT "\n", ## __VA_ARGS__)
-#define ttracei(FMT, ...) printf("[TRA] (i) " FMT "\n", ## __VA_ARGS__)
+#define ttrace(FMT, ...) trace(FMT, ## __VA_ARGS__)
+#define ttracei(FMT, ...) tracei(TSIG, FMT, ## __VA_ARGS__)
 #else
 #define ttrace(FMT, ...) ;
 #define ttracei(FMT, ...) ;
@@ -496,19 +497,17 @@ static void translator_deinit(translator_t* trans) {
 
 /* ========= address handling  ========= */
 
+extern int parse_str(const char* str, void(*on_err)(int));
+
+static void on_err(int errno) {
+	logt_err("%s", strerror(errno));
+
+	return;
+}
+
 static int parse_arg(const char* str) {
-	int ret;
 
-	errno = 0;
-	ret = (int)strtol(str, NULL, 16);
-
-	if (errno) {
-		logt_err("%s", strerror(errno));
-
-		return -1;
-	}
-
-	return ret;
+	return parse_str(str, on_err);
 }
 
 static int get_arg(translator_t* trans, const char* str) {

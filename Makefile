@@ -9,7 +9,15 @@ ifeq (,$(wildcard source/cpu6502-opcodes.c))
 objs += build/cpu6502-opcodes.o
 endif
 
-CFLAGS := -Iinclude -o3 -DDEVICE_SAFEGUARD=100 -DDEVICE_TRACE -g -DCPU_TRACE
+CFLAGS := -Iinclude -o3 -g
+OPTIONS = $(shell sed '/^\s*\#/d' config.txt | awk ' \
+	BEGIN { opts="" } \
+	{ opts = opts (opts == "" ? "" : OFS) "-D" $$0 } \
+	END { print opts }')
+
+CFLAGS += $(OPTIONS)
+
+common := config.txt
 
 all: $(proj) build
 
@@ -17,13 +25,13 @@ all: $(proj) build
 build:
 	mkdir build
 
-$(proj): build $(objs)
+$(proj): build $(objs) $(common)
 	$(CC) $(CFLAGS) $(objs) -o $@ -lpthread
 
-source/cpu6502-opcodes.c:
+source/cpu6502-opcodes.c: $(common)
 	./scripts/genops.py > $@
 
-build/%.o: source/%.c
+build/%.o: source/%.c $(common)
 	$(CC) $(CFLAGS) -c $< -o $@
 
 .PHONY=run

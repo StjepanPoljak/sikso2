@@ -42,6 +42,14 @@ typedef enum {
 #define clr_Z(cpu) clr_bit(cpu, 1)
 #define get_Z(cpu) get_bit(cpu, 1)
 
+#define set_I(cpu) set_bit(cpu, 2)
+#define clr_I(cpu) clr_bit(cpu, 2)
+#define get_I(cpu) get_bit(cpu, 2)
+
+#define set_D(cpu) set_bit(cpu, 3)
+#define clr_D(cpu) clr_bit(cpu, 3)
+#define get_D(cpu) get_bit(cpu, 3)
+
 #define set_V(cpu) set_bit(cpu, 6)
 #define clr_V(cpu) clr_bit(cpu, 6)
 #define get_V(cpu) get_bit(cpu, 6)

@@ -73,7 +73,7 @@ void init_device(struct device_t* device, struct cpu_6502_t* cpu,
 int load_to_ram(struct device_t* device, uint16_t load_addr,
 		const uint8_t* data, unsigned int data_size);
 
-int run_device(struct device_t* device);
+int run_device(struct device_t* device, bool end_on_last_instr);
 void free_device(struct device_t* device);
 
 #endif
