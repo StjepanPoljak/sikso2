@@ -1,11 +1,11 @@
 #include <stdlib.h> /* strtol */
 #include <errno.h>
 
-int parse_str(const char* str, void(*on_err)(int)) {
+int parse_str(const char* str, int base, void(*on_err)(int)) {
 	int ret;
 
 	errno = 0;
-	ret = (int)strtol(str, NULL, 16);
+	ret = (int)strtol(str, NULL, base);
 
 	if (errno && on_err) {
 		on_err(errno);

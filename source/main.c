@@ -2,20 +2,46 @@
 #include <unistd.h> /* getopt */
 #include <getopt.h>
 #include <stdbool.h>
+#include <string.h>
 
 #include "translator.h"
 #include "device.h"
+#include "common.h"
+
+#define MSIG "MAI"
+
+#define logm_err(FMT, ...) log_err(MSIG, FMT, ## __VA_ARGS__)
+
+#ifdef MAIN_TRACE
+#define mtrace(FMT, ...) trace(FMT, ## __VA_ARGS__)
+#define mtracei(FMT, ...) tracei(MSIG, FMT, ## __VA_ARGS__)
+#else
+#define mtrace(FMT, ...) ;
+#define mtracei(FMT, ...) ;
+#endif
 
 extern void init_cpu_6502_actions(void);
 
 /* ======= run device ======= */
 
 typedef struct {
-	uint16_t load_addr;
-	uint16_t zero_page;
-	uint16_t page_size;
+	int32_t load_addr;
+	int32_t zero_page;
+	int32_t page_size;
 	bool end_on_final_instr;
-} run_settings_t;
+} settings_t;
+
+#define get_load_addr(settings) \
+	settings->load_addr < 0 ? DEFAULT_LOAD_ADDR \
+				: (uint16_t)settings->load_addr
+
+#define get_zero_page(settings) \
+	settings->zero_page < 0 ? DEFAULT_ZERO_PAGE \
+				: (uint16_t)settings->zero_page
+
+#define get_page_size(settings) \
+	settings->page_size < 0 ? DEFAULT_PAGE_SIZE \
+				: (uint16_t)settings->page_size
 
 static int main_run_device(unsigned int len, const uint8_t* out, void* data) {
 	struct device_t device;
@@ -24,27 +50,33 @@ static int main_run_device(unsigned int len, const uint8_t* out, void* data) {
 
 	ret = 0;
 
-	printf("(i) Initializing CPU 6502 actions.\n");
+	mtracei("Initializing CPU 6502 actions.");
 
 	init_cpu_6502_actions();
 
-	printf("(i) Initializing device.\n");
+	mtracei("Initializing device.");
 
 	init_cpu(&cpu, get_instr_list());
-	init_device(&device, &cpu, 0x0600, 0x0, 256);
+	init_device(&device, &cpu, get_load_addr(((settings_t*)data)),
+		    get_zero_page(((settings_t*)data)),
+		    get_page_size(((settings_t*)data)));
 
-	ret = load_to_ram(&device, 0x0600, out, len);
+	ret = load_to_ram(&device, get_load_addr(((settings_t*)data)),
+			  out, len);
 	if (ret)
 		return ret;
 
-	run_device(&device, ((run_settings_t*)data)->end_on_final_instr);
+	run_device(&device, ((settings_t*)data)->end_on_final_instr);
 
 	return ret;
 }
 
-static int run_action(const char* infile, run_settings_t* run_settings) {
+static int run_action(const char* infile, settings_t* settings) {
 
-	return translate(infile, 0x0600, 0x0, 256, main_run_device, (void*)run_settings);
+	return translate(infile, get_load_addr(settings),
+			 get_zero_page(settings),
+			 get_page_size(settings),
+			 main_run_device, (void*)settings);
 }
 
 /* ======= debug ======= */
@@ -61,7 +93,7 @@ static int print_binary(unsigned int len, const uint8_t* out, void* data) {
 
 	if (data) {
 		td = (struct translation_data_t*)data;
-		printf("(i) Dumping binary translated from %s\n", td->infile);
+		mtracei("Dumping binary translated from %s", td->infile);
 	}
 
 	cols = 5;
@@ -98,34 +130,38 @@ static int export_binary(unsigned int len, const uint8_t* out, void* data) {
 
 	f = fopen(td->outfile, "w");
 	if (!f) {
-		printf("(!) Could not open %s for output.\n", td->outfile);
+		logm_err("Could not open %s for output.", td->outfile);
 
 		return -1;
 	}
 
 	ret = fwrite(out, 1, len, f);
 	if (ret != len) {
-		printf("(!) Error writing data to %s.\n", td->outfile);
+		logm_err("Error writing data to %s.", td->outfile);
 
 		return -1;
 	}
 	else
-		printf("(i) Successfully written binary to %s.\n",
-		       td->outfile);
+		mtracei("(i) Successfully written binary to %s.",
+			td->outfile);
 
 	fclose(f);
 
 	return 0;
 }
 
-static int translate_file(const char* infile, const char* outfile) {
+static int translate_file(const char* infile, const char* outfile,
+			  settings_t* settings) {
 	struct translation_data_t td;
 	const char default_outfile[] = "a.out";
 
 	td.infile = infile;
 	td.outfile = outfile ?: default_outfile;
 
-	return translate(td.infile, 0x0600, 0x0, 256, export_binary, &td);
+	return translate(td.infile, get_load_addr(settings),
+			 get_zero_page(settings),
+			 get_page_size(settings),
+			 export_binary, &td);
 }
 
 typedef enum {
@@ -148,58 +184,106 @@ static struct option long_options[] = {
 	{ 0,		0,			0,  0  }
 };
 
+static bool is_hex(const char* str) {
+
+	if (strlen(str) < 2)
+		return false;
+
+	if ((str[0] == '0') && (str[1] == 'x'))
+		return true;
+
+	return false;
+}
+
+static void on_err(int errno) {
+
+	logm_err("Could not parse argument (%s)", strerror(errno));
+
+	return;
+}
+
+static int parse_arg(const char* str) {
+
+	return parse_str(str, is_hex(str) ? 16 : 10, on_err);
+}
+
 int main(int argc, char* const argv[]) {
 	int opt;
 	char* infile;
 	char* outfile;
 	main_action_t action;
-	run_settings_t run_settings;
+	settings_t settings;
 	int option_index = 0;
 
 	infile = NULL;
 	outfile = NULL;
 	action = MAIN_ACTION_NONE;
 
-	run_settings.end_on_final_instr = false;
+	settings.load_addr = -1;
+	settings.zero_page = -1;
+	settings.page_size = -1;
+	settings.end_on_final_instr = false;
 
-	while ((opt = getopt_long(argc, argv, "r:st:o:h", long_options, &option_index)) != -1) {
+	while ((opt = getopt_long(argc, argv, "r:z:p:a:sdm:t:o:h",
+				  long_options, &option_index)) != -1) {
 
 		switch (opt) {
+
+		case 'r':
+			infile = optarg;
+			action = MAIN_ACTION_RUN;
+			break;
+
+		case 'z':
+			settings.zero_page = (uint16_t)parse_arg(optarg);
+			break;
+
+		case 'p':
+			settings.page_size = (uint16_t)parse_arg(optarg);
+			break;
+
+		case 'a':
+			settings.load_addr = (uint16_t)parse_arg(optarg);
+			break;
+
+		case 's':
+			settings.end_on_final_instr = true;
+			break;
+
+		case 'd':
+			logm_err("Not implemented");
+			return -1;
+
+		case 'm':
+			logm_err("Not implemented");
+			return -1;
 
 		case 't':
 			infile = optarg;
 			action = MAIN_ACTION_TRANSLATE;
-
 			break;
+
 		case 'o':
 			outfile = optarg;
-
 			break;
+
 		case 'h':
 			printf("Example usage:\n\n\tsikso2 -t "
 			       "test.asm -o test\n\n");
-
 			return 0;
-		case 'r':
-			infile = optarg;
-			action = MAIN_ACTION_RUN;
 
-			break;
-		case 's':
-			run_settings.end_on_final_instr = true;
 
-			break;
 		default:
-			printf("(!) Unknown stuff here (%d, %s).\n",
-			       opt, optarg);
+			logm_err("Unknown stuff here (%d, %s).",
+				 opt, optarg);
 
 			return -1;
 		}
 	}
 
 	if (!infile) {
-		printf("(!) Please specify input file with "
-		       "-t or -r switch.\n");
+		logm_err("Please specify input file with "
+			 "-t or -r switch.");
 
 		return -1;
 	}
@@ -208,14 +292,14 @@ int main(int argc, char* const argv[]) {
 
 	case MAIN_ACTION_TRANSLATE:
 
-		return translate_file(infile, outfile);
+		return translate_file(infile, outfile, &settings);
 
 	case MAIN_ACTION_RUN:
 
-		return run_action(infile, &run_settings);
+		return run_action(infile, &settings);
 
 	case MAIN_ACTION_NONE:
-		printf("Nothing to do.\n");
+		logm_err("Nothing to do.");
 		break;
 	}
 

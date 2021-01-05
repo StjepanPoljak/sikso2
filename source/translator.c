@@ -483,8 +483,6 @@ static void translator_deinit(translator_t* trans) {
 
 /* ========= address handling  ========= */
 
-extern int parse_str(const char* str, void(*on_err)(int));
-
 static void on_err(int errno) {
 	logt_err("%s", strerror(errno));
 
@@ -493,7 +491,7 @@ static void on_err(int errno) {
 
 static int parse_arg(const char* str) {
 
-	return parse_str(str, on_err);
+	return parse_str(str, 16, on_err);
 }
 
 static int get_arg(translator_t* trans, const char* str) {
