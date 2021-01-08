@@ -24,8 +24,14 @@ typedef struct cpu_6502_t {
 typedef enum {
 	CPU_DUMP_SIMPLE,
 	CPU_DUMP_ONELINE,
-	CPU_DUMP_PRETTY
+	CPU_DUMP_PRETTY,
+	CPU_DUMP_NONE
 } cpu_dump_mode_t;
+
+typedef struct {
+	cpu_dump_mode_t cpu_dump_mode;
+	char* mode_string;
+} cpu_dump_t;
 
 #define set_bit(cpu, bit) \
 	(cpu)->P |= ((uint8_t)1 << bit)
@@ -61,6 +67,8 @@ typedef enum {
 void init_cpu(struct cpu_6502_t* cpu, instr_t* instr_list);
 void start_cpu(struct cpu_6502_t* cpu, uint16_t zero_page,
 	       uint16_t page_size, uint16_t load_addr);
+cpu_dump_mode_t parse_cpu_dump_mode(const char* arg);
+char* get_cpu_dump_help(const char* fmt);
 void dump_cpu(struct cpu_6502_t* cpu, cpu_dump_mode_t mode);
 
 #endif

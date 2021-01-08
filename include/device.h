@@ -6,6 +6,8 @@
 #include <stdint.h>
 #include <stdbool.h>
 
+#include "common.h"
+
 #define DEVICE_TAKE_BRANCH 5
 #define DEVICE_GENERATE_NMI 4
 #define DEVICE_GENERATE_IRQ 3
@@ -23,6 +25,7 @@ typedef struct {
 	uint8_t ram[65536];
 	uint16_t zero_page;
 	uint16_t page_size;
+	uint16_t end_instr;
 } ram_t;
 
 typedef struct {
@@ -72,8 +75,10 @@ void init_device(struct device_t* device, struct cpu_6502_t* cpu,
 
 int load_to_ram(struct device_t* device, uint16_t load_addr,
 		const uint8_t* data, unsigned int data_size);
-
-int run_device(struct device_t* device, bool end_on_last_instr);
+int run_device(struct device_t* device,
+	       bool end_on_last_instr,
+	       cpu_dump_mode_t cpu_dump_mode,
+	       struct mem_region_t* mrhead);
 void free_device(struct device_t* device);
 
 #endif

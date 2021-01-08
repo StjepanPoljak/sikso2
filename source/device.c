@@ -2,6 +2,7 @@
 
 #include "instr.h"
 #include "cpu.h"
+#include "mem.h"
 #include "common.h"
 
 #include <string.h> /* memcpy */
@@ -18,9 +19,11 @@
 #define dtracei(FMT, ...) ;
 #endif
 
-static uint16_t end_instr = 0;
+extern void print_mem_region(struct device_t* device, struct mem_region_t* mr);
+extern void dump_mem(struct device_t* device, struct mem_region_t* mr);
 
-static bool in_peripheral_addr(struct peripheral_t* peripheral, uint16_t addr) {
+static bool in_peripheral_addr(struct peripheral_t* peripheral,
+			       uint16_t addr) {
 
 	return (addr >= peripheral->addr_start)
 	    && (addr <= peripheral->addr_end);
@@ -124,7 +127,7 @@ int load_to_ram(struct device_t* device, uint16_t load_addr,
 		}
 	}
 
-	end_instr = (uint16_t)data_size + load_addr;
+	device->ram.end_instr = (uint16_t)data_size + load_addr;
 
 	return 0;
 }
@@ -255,7 +258,9 @@ int execute(struct device_t* device) {
 	device->instr_frag.pending = false;
 
 #ifdef DEVICE_TRACE
-	dtrace("Execution took %d cycles (%d%s).", device->instr_frag.ncyc + 1, map->subinstr->cycles, map->subinstr->mode & MODE_EXTRA_CYCLE ? "+" : "");
+	dtrace("Execution took %d cycles (%d%s).",
+	       device->instr_frag.ncyc + 1, map->subinstr->cycles,
+	       map->subinstr->mode & MODE_EXTRA_CYCLE ? "+" : "");
 #endif
 
 #ifdef CPU_TRACE
@@ -267,10 +272,7 @@ int execute(struct device_t* device) {
 
 int nop(struct device_t* device) {
 
-	(void)device;
-
 	device->cpu->PC++;
-
 	dtracei("NOP");
 
 	return 0;
@@ -344,7 +346,10 @@ int fetch_op(struct device_t* device) {
 	return ret;
 }
 
-int run_device(struct device_t* device, bool end_on_last_instr) {
+int run_device(struct device_t* device,
+	       bool end_on_last_instr,
+	       cpu_dump_mode_t cpu_dump_mode,
+	       struct mem_region_t* mrhead) {
 	int ret;
 #ifdef DEVICE_SAFEGUARD
 	int safeguard;
@@ -353,7 +358,7 @@ int run_device(struct device_t* device, bool end_on_last_instr) {
 	ret = 0;
 
 	if (end_on_last_instr)
-		dtracei("Ending on %.4x", end_instr);
+		dtracei("Ending on %.4x", device->ram.end_instr);
 
 #ifdef DEVICE_SAFEGUARD
 	safeguard = DEVICE_SAFEGUARD;
@@ -369,7 +374,8 @@ int run_device(struct device_t* device, bool end_on_last_instr) {
 
 	while (ret >= 0) {
 
-		if (end_on_last_instr && (device->cpu->PC == end_instr)) {
+		if ((end_on_last_instr)
+		 && (device->cpu->PC == device->ram.end_instr)) {
 			dtracei("Reached last instruction "
 				"(PC=%.4x)", device->cpu->PC);
 			break;
@@ -382,7 +388,8 @@ int run_device(struct device_t* device, bool end_on_last_instr) {
 
 #ifdef DEVICE_SAFEGUARD
 		if (!(--safeguard)) {
-			dtracei("Reached safeguard (%d cycles)!", DEVICE_SAFEGUARD);
+			dtracei("Reached safeguard (%d cycles)!",
+				DEVICE_SAFEGUARD);
 			break;
 		}
 #endif
@@ -390,8 +397,19 @@ int run_device(struct device_t* device, bool end_on_last_instr) {
 
 	if (ret < 0)
 		logd_err("Cycle execution returned %d", ret);
-	else
+	else {
 		dtracei("Return value: %d", ret);
+
+		if (cpu_dump_mode != CPU_DUMP_NONE) {
+			dtracei("Dumping CPU registers...");
+			dump_cpu(device->cpu, cpu_dump_mode);
+		}
+
+		if (mrhead) {
+			dtracei("Dumping memory...");
+			dump_mem(device, mrhead);
+		}
+	}
 
 	free_device(device);
 

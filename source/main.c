@@ -24,25 +24,6 @@ extern void init_cpu_6502_actions(void);
 
 /* ======= run device ======= */
 
-typedef struct {
-	int32_t load_addr;
-	int32_t zero_page;
-	int32_t page_size;
-	bool end_on_final_instr;
-} settings_t;
-
-#define get_load_addr(settings) \
-	settings->load_addr < 0 ? DEFAULT_LOAD_ADDR \
-				: (uint16_t)settings->load_addr
-
-#define get_zero_page(settings) \
-	settings->zero_page < 0 ? DEFAULT_ZERO_PAGE \
-				: (uint16_t)settings->zero_page
-
-#define get_page_size(settings) \
-	settings->page_size < 0 ? DEFAULT_PAGE_SIZE \
-				: (uint16_t)settings->page_size
-
 static int main_run_device(unsigned int len, const uint8_t* out, void* data) {
 	struct device_t device;
 	struct cpu_6502_t cpu;
@@ -66,7 +47,10 @@ static int main_run_device(unsigned int len, const uint8_t* out, void* data) {
 	if (ret)
 		return ret;
 
-	run_device(&device, ((settings_t*)data)->end_on_final_instr);
+	run_device(&device,
+		   ((settings_t*)data)->end_on_final_instr,
+		   ((settings_t*)data)->cpu_dump_mode,
+		   ((settings_t*)data)->mrhead);
 
 	return ret;
 }
@@ -89,26 +73,13 @@ struct translation_data_t {
 #ifdef TRANSLATOR_TRACE
 static int print_binary(unsigned int len, const uint8_t* out, void* data) {
 	struct translation_data_t* td;
-	unsigned int i, j, cols, rows, end;
 
 	if (data) {
 		td = (struct translation_data_t*)data;
 		mtracei("Dumping binary translated from %s", td->infile);
 	}
 
-	cols = 5;
-	rows = len / cols;
-
-	for (i = 0; i < rows + (len % cols ? 1 : 0); i++) {
-		end = (i + 1) * cols < len ? (i + 1) * cols : len;
-
-		printf("%.4x: ", i * cols);
-
-		for (j = i * cols; j < end; j++)
-			printf("%.2x%s", out[j], j == end - 1 ? "" : " ");
-
-		printf("\n");
-	}
+	print_hex(out, len, 0);
 
 	return 0;
 }
@@ -167,6 +138,7 @@ static int translate_file(const char* infile, const char* outfile,
 typedef enum {
 	MAIN_ACTION_TRANSLATE,
 	MAIN_ACTION_RUN,
+	MAIN_ACTION_HELP,
 	MAIN_ACTION_NONE
 } main_action_t;
 
@@ -184,15 +156,99 @@ static struct option long_options[] = {
 	{ 0,		0,			0,  0  }
 };
 
-static bool is_hex(const char* str) {
+static void print_option_help(struct option* opt, char* help_string) {
+	char* long_txt;
+	char short_txt[3];
 
-	if (strlen(str) < 2)
-		return false;
+	short_txt[0] = '-';
+	short_txt[1] = opt->val;
+	short_txt[2] = '\0';
 
-	if ((str[0] == '0') && (str[1] == 'x'))
-		return true;
+	long_txt = malloc(strlen(opt->name) + 3);
+	long_txt[0] = '-';
+	long_txt[1] = '-';
+	long_txt[strlen(opt->name) + 2] = '\0';
+	strcpy(long_txt + 2, opt->name);
 
-	return false;
+	printf("%1s %-6s %-18s %s\n", "", short_txt, long_txt, help_string);
+
+	free(long_txt);
+
+	return;
+}
+
+#define help_text(str) \
+	print_option_help(&(long_options[i]), str)
+
+#define TEX(A) #A
+
+#define Z_HELP_STR(ZERO_PAGE) \
+	"zero page (default: " TEX(ZERO_PAGE) ")"
+
+#define P_HELP_STR(PAGE_SIZE) \
+	"page size (default: " TEX(PAGE_SIZE) ")"
+
+#define A_HELP_STR(LOAD_ADDR) \
+	"load addr (default: " TEX(LOAD_ADDR) ")"
+
+static void print_help(void) {
+	unsigned int i;
+	char* cpu_dump_help;
+
+	i = 0;
+
+	printf("\n\tsikso2, a 6502 emulator and translator\n\n");
+
+	printf("Author:\tStjepan Poljak\n"
+	       "E-Mail:\tstjepan.poljak@protonmail.com\n"
+	       "Year:\t2021\n\n"
+	       "Usage:\n");
+
+	while (i < (sizeof(long_options) / sizeof(struct option) - 1)) {
+		switch(long_options[i].val) {
+		case 'r':
+			help_text("run file");
+			break;
+		case 'z':
+			help_text(Z_HELP_STR(DEFAULT_ZERO_PAGE));
+			break;
+		case 'p':
+			help_text(P_HELP_STR(DEFAULT_PAGE_SIZE));
+			break;
+		case 'a':
+			help_text(A_HELP_STR(DEFAULT_LOAD_ADDR));
+			break;
+		case 's':
+			help_text("stop after last instruction");
+			break;
+		case 'd':
+			cpu_dump_help = get_cpu_dump_help(
+					"dump CPU registers: %s");
+			help_text(cpu_dump_help);
+			free(cpu_dump_help);
+			break;
+		case 'm':
+			help_text("dump memory (e.g. 0x0600-0x060a,0x0700)");
+			break;
+		case 't':
+			help_text("translate file to binary");
+			break;
+		case 'o':
+			help_text("output file name (default: a.out)");
+			break;
+		case 'h':
+			help_text("print help");
+			break;
+		default:
+			break;
+		}
+
+		i++;
+	}
+
+	printf("\n");
+
+	return;
 }
 
 static void on_err(int errno) {
@@ -207,6 +263,11 @@ static int parse_arg(const char* str) {
 	return parse_str(str, is_hex(str) ? 16 : 10, on_err);
 }
 
+#define IMPROPER_USAGE \
+	printf("Improper usage. Try -h for help.\n"); \
+	return -1
+
+
 int main(int argc, char* const argv[]) {
 	int opt;
 	char* infile;
@@ -214,94 +275,120 @@ int main(int argc, char* const argv[]) {
 	main_action_t action;
 	settings_t settings;
 	int option_index = 0;
+	bool run_setting;
+	bool tra_setting;
 
 	infile = NULL;
 	outfile = NULL;
 	action = MAIN_ACTION_NONE;
 
-	settings.load_addr = -1;
-	settings.zero_page = -1;
-	settings.page_size = -1;
-	settings.end_on_final_instr = false;
+	run_setting = false;
+	tra_setting = false;
 
-	while ((opt = getopt_long(argc, argv, "r:z:p:a:sdm:t:o:h",
+	init_settings(&settings);
+
+	while ((opt = getopt_long(argc, argv, "r:z:p:a:sd:m:t:o:h",
 				  long_options, &option_index)) != -1) {
-
 		switch (opt) {
 
 		case 'r':
 			infile = optarg;
+			if (action != MAIN_ACTION_NONE) {
+				IMPROPER_USAGE;
+			}
 			action = MAIN_ACTION_RUN;
 			break;
 
 		case 'z':
 			settings.zero_page = (uint16_t)parse_arg(optarg);
+			run_setting = true;
 			break;
 
 		case 'p':
 			settings.page_size = (uint16_t)parse_arg(optarg);
+			run_setting = true;
 			break;
 
 		case 'a':
 			settings.load_addr = (uint16_t)parse_arg(optarg);
+			run_setting = true;
 			break;
 
 		case 's':
 			settings.end_on_final_instr = true;
+			run_setting = true;
 			break;
 
 		case 'd':
-			logm_err("Not implemented");
-			return -1;
+			settings.cpu_dump_mode = parse_cpu_dump_mode(optarg);
+			run_setting = true;
+			break;
 
 		case 'm':
-			logm_err("Not implemented");
-			return -1;
+			settings.mrhead = parse_mem_region(optarg);
+			run_setting = true;
+			break;
 
 		case 't':
 			infile = optarg;
+			if (action != MAIN_ACTION_NONE) {
+				IMPROPER_USAGE;
+			}
 			action = MAIN_ACTION_TRANSLATE;
 			break;
 
 		case 'o':
 			outfile = optarg;
+			tra_setting = true;
 			break;
 
 		case 'h':
-			printf("Example usage:\n\n\tsikso2 -t "
-			       "test.asm -o test\n\n");
-			return 0;
-
+			if (action != MAIN_ACTION_NONE) {
+				IMPROPER_USAGE;
+			}
+			action = MAIN_ACTION_HELP;
+			break;
 
 		default:
-			logm_err("Unknown stuff here (%d, %s).",
-				 opt, optarg);
-
-			return -1;
+			IMPROPER_USAGE;
 		}
 	}
 
-	if (!infile) {
-		logm_err("Please specify input file with "
-			 "-t or -r switch.");
-
-		return -1;
+	if (!infile && action != MAIN_ACTION_HELP) {
+		IMPROPER_USAGE;
 	}
 
 	switch (action) {
 
+	case MAIN_ACTION_HELP:
+
+		if (run_setting || tra_setting) {
+			IMPROPER_USAGE;
+		}
+
+		print_help();
+
+		break;
+
 	case MAIN_ACTION_TRANSLATE:
+
+		if (run_setting) {
+			IMPROPER_USAGE;
+		}
 
 		return translate_file(infile, outfile, &settings);
 
 	case MAIN_ACTION_RUN:
 
+		if (tra_setting) {
+			IMPROPER_USAGE;
+		}
+
 		return run_action(infile, &settings);
 
 	case MAIN_ACTION_NONE:
-		logm_err("Nothing to do.");
-		break;
+		IMPROPER_USAGE;
 	}
 
-	return -1;
+	return 0;
 }
