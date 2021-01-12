@@ -114,7 +114,8 @@ static int fetch(struct device_t* device, uint8_t* byte) {
 }
 
 int load_to_ram(struct device_t* device, uint16_t load_addr,
-		const uint8_t* data, unsigned int data_size) {
+		const uint8_t* data, unsigned int data_size,
+		bool binary) {
 	unsigned int i;
 	int ret;
 
@@ -127,7 +128,8 @@ int load_to_ram(struct device_t* device, uint16_t load_addr,
 		}
 	}
 
-	device->ram.end_instr = (uint16_t)data_size + load_addr;
+	if (binary)
+		device->ram.end_instr = (uint16_t)data_size + load_addr;
 
 	return 0;
 }
@@ -299,6 +301,12 @@ int fetch_op(struct device_t* device) {
 #endif
 	ret = fetch(device, &byte);
 
+	if (!device->cpu->instr_map[byte].instr) {
+		logd_err("Unknown instruction fetched.");
+
+		return DEVICE_INSTRUCTION_ERROR;
+	}
+
 #ifdef DEVICE_TRACE
 	memcpy(name, device->cpu->instr_map[byte].instr->name, 3);
 	dtracei("Fetching instruction at %.4x", address);
@@ -307,12 +315,6 @@ int fetch_op(struct device_t* device) {
 	dtrace("length: %d", instr_length(device, byte));
 	dtrace("cycles: %d", instr_cycles(device, byte));
 #endif
-
-	if (!device->cpu->instr_map[byte].instr) {
-		logd_err("Unknown instruction fetched.");
-
-		return DEVICE_INSTRUCTION_ERROR;
-	}
 
 	if (device->instr_frag.pending) {
 		logd_err("Instruction pending while fetching.");

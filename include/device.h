@@ -74,7 +74,8 @@ void init_device(struct device_t* device, struct cpu_6502_t* cpu,
 		 uint16_t page_size);
 
 int load_to_ram(struct device_t* device, uint16_t load_addr,
-		const uint8_t* data, unsigned int data_size);
+		const uint8_t* data, unsigned int data_size,
+		bool binary);
 int run_device(struct device_t* device,
 	       bool end_on_last_instr,
 	       cpu_dump_mode_t cpu_dump_mode,

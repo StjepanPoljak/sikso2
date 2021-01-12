@@ -35,11 +35,15 @@ typedef struct {
 	bool end_on_final_instr;
 	cpu_dump_mode_t cpu_dump_mode;
 	struct mem_region_t* mrhead;
+	mem_image_t* mimage;
+	struct mem_byte_t* mbhead;
 } settings_t;
 
 void init_settings(settings_t* settings);
+void free_settings(settings_t* settings);
 bool is_hex(const char* str);
 void print_hex(const uint8_t* mem, unsigned int len, unsigned int offset);
 int parse_str(const char* str, int base, void(*on_err)(int));
+uint8_t* load_file(const char* infile, unsigned int* len);
 
 #endif

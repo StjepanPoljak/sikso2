@@ -32,7 +32,24 @@ void init_settings(settings_t* settings) {
 	settings->zero_page = -1;
 	settings->page_size = -1;
 	settings->end_on_final_instr = false;
+	settings->cpu_dump_mode = CPU_DUMP_NONE;
 	settings->mrhead = NULL;
+	settings->mimage = NULL;
+	settings->mbhead = NULL;
+
+	return;
+}
+
+void free_settings(settings_t* settings) {
+
+	if (settings->mrhead)
+		free_mem_region_list(settings->mrhead);
+
+	if (settings->mimage)
+		free_mem_image(settings->mimage);
+
+	if (settings->mbhead)
+		free_mem_bytes(settings->mbhead);
 
 	return;
 }
@@ -50,16 +67,55 @@ bool is_hex(const char* str) {
 
 int parse_str(const char* str, int base, void(*on_err)(int)) {
 	int ret;
+	char *endptr;
+
+	if (!strlen(str))
+		return -1;
 
 	errno = 0;
-	ret = (int)strtol(str, NULL, base);
+	ret = (int)strtol(str, &endptr, base);
 
 	if (errno && on_err) {
 		on_err(errno);
 
-		return -1;
+		return -2;
 	}
+
+	if (*endptr != '\0')
+		return -3;
 
 	return ret;
 }
+
+uint8_t* load_file(const char* infile, unsigned int* len) {
+	uint8_t* out;
+	long fsize;
+	FILE* f;
+
+	f = fopen(infile, "r");
+	if (!f)
+		return NULL;
+
+	fseek(f, 0, SEEK_END);
+
+	fsize = ftell(f);
+
+	out = malloc(fsize);
+	if (!out)
+		return NULL;
+
+	*len = fsize;
+
+	fseek(f, 0, SEEK_SET);
+
+	if (fread(out, 1, fsize, f) != fsize) {
+		free(out);
+		return NULL;
+	}
+
+	fclose(f);
+
+	return out;
+}
+
 

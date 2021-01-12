@@ -56,6 +56,10 @@ typedef struct {
 #define clr_D(cpu) clr_bit(cpu, 3)
 #define get_D(cpu) get_bit(cpu, 3)
 
+#define set_B(cpu) set_bit(cpu, 4)
+#define clr_B(cpu) clr_bit(cpu, 4)
+#define get_B(cpu) get_bit(cpu, 4)
+
 #define set_V(cpu) set_bit(cpu, 6)
 #define clr_V(cpu) clr_bit(cpu, 6)
 #define get_V(cpu) get_bit(cpu, 6)

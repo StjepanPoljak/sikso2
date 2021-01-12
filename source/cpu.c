@@ -40,7 +40,7 @@ void start_cpu(struct cpu_6502_t* cpu, uint16_t zero_page,
 	cpu->X = 0x0;
 	cpu->Y = 0x0;
 	cpu->S = zero_page + page_size * 2;
-	cpu->P = 0x0;
+	cpu->P = (uint8_t)1 << 5;
 	cpu->PC = load_addr;
 
 	return;

@@ -33,10 +33,10 @@ extern instr_t* get_instr_list(void);
 	else clr_N((device)->cpu);
 
 #define get_sign(x) \
-	(x & ((uint8_t)1 << 7) ? -1 : 1)
+	(((x) & ((uint8_t)1 << 7)) ? -1 : 1)
 
 #define get_abs(x) \
-	(x & ~((uint8_t)1 << 7))
+	((x) & ~((uint8_t)1 << 7))
 
 #define get_signed(x) \
 	((int)get_sign(x) * (int)get_abs(x))
@@ -53,20 +53,19 @@ extern instr_t* get_instr_list(void);
 	else clr_C(cpu)
 
 #define check_carry_sbc(cpu, x, y) \
-	if ((int)x + (int)y > 255) clr_C(cpu); \
+	if ((int)x < (int)y) clr_C(cpu); \
 	else set_C(cpu)
 
 #define check_overflow_adc(cpu, x, y) \
-	if ((get_signed(x) + get_signed(y) + (int)get_C(cpu) >= 127) \
-	 || (get_signed(x) + get_signed(y) + (int)get_C(cpu) <= -128)) \
-		set_V(cpu); \
+	if (get_sign(x) == get_sign(y) && get_sign(x + y + get_C(cpu)) != get_sign(x)) \
+			set_V(cpu); \
 	else clr_V(cpu)
 
 #define check_overflow_sbc(cpu, x, y) \
-	if ((get_signed(x) - get_signed(y) + (int)get_C(cpu) - 1 >= 127) \
-	 || (get_signed(x) - get_signed(y) + (int)get_C(cpu) - 1 <= -128)) \
-		set_V(cpu); \
-	else clr_V(cpu)
+	check_overflow_adc(cpu, x, 255-y)
+	/*if (get_sign(x) != get_sign(y) && get_sign(x - y + get_C(cpu) - 1) != get_sign(x)) \
+			set_V(cpu); \
+	else clr_V(cpu)*/
 
 static uint16_t get_page(struct device_t* device, uint16_t addr) {
 
@@ -239,12 +238,15 @@ static int write_byte(struct device_t* device, uint16_t addr,
 DEFINE_ACTION(ADC) {
 	uint8_t byte;
 	int ret;
+	uint8_t c;
+
+	c = get_C(_device->cpu);
 
 	switch (_mode) {
 	case MODE_IMMEDIATE:
-		check_carry_adc(_device->cpu, _device->cpu->A, arg);
 		check_overflow_adc(_device->cpu, _device->cpu->A, arg);
-		_device->cpu->A += (arg + get_C(_device->cpu));
+		check_carry_adc(_device->cpu, _device->cpu->A, arg);
+		_device->cpu->A += (arg + c);
 
 		break;
 	default:
@@ -252,9 +254,9 @@ DEFINE_ACTION(ADC) {
 		if (ret)
 			return ret;
 
-		check_carry_adc(_device->cpu, _device->cpu->A, byte);
 		check_overflow_adc(_device->cpu, _device->cpu->A, byte);
-		_device->cpu->A += (byte + get_C(_device->cpu));
+		check_carry_adc(_device->cpu, _device->cpu->A, byte);
+		_device->cpu->A += (byte + c);
 
 		break;
 	}
@@ -443,6 +445,8 @@ DEFINE_ACTION(BRK) {
 
 	_device->cpu->PC++;
 
+	set_B(_device->cpu);
+
 	return DEVICE_GENERATE_NMI;
 }
 
@@ -450,14 +454,20 @@ static int sbc_comm(subinstr_t* s, uint16_t arg, void* data,
 		    bool cmp_only, uint8_t* reg) {
 	uint8_t byte;
 	int ret;
+	uint8_t c;
+
+	c = get_C(_device->cpu);
 
 	switch (_mode) {
 	case MODE_IMMEDIATE:
+		if (!cmp_only) {
+			check_overflow_sbc(_device->cpu, *reg, arg);
+		}
+
 		check_carry_sbc(_device->cpu, *reg, arg);
 
 		if (!cmp_only) {
-			check_overflow_sbc(_device->cpu, *reg, arg);
-			*reg -= (arg + get_C(_device->cpu));
+			*reg -= (arg - c + 1);
 		}
 
 		break;
@@ -466,11 +476,13 @@ static int sbc_comm(subinstr_t* s, uint16_t arg, void* data,
 		if (ret)
 			return ret;
 
-		check_carry_sbc(_device->cpu, *reg, byte);
 
-		if (cmp_only) {
+		if (!cmp_only) {
 			check_overflow_sbc(_device->cpu, *reg, byte);
-			*reg -= (byte + get_C(_device->cpu));
+		}
+		check_carry_sbc(_device->cpu, *reg, byte);
+		if (!cmp_only) {
+			*reg -= (byte + c - 1);
 		}
 
 		break;

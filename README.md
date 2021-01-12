@@ -45,9 +45,19 @@ The assembler follows a rather simple syntax and is almost fully functional. You
 
 This will create a binary that is executable on a 6502 CPU.
 
-## Running
+## Run
 
-The best way to run a device is to use:
+### Run binary
+
+To run binary (e.g. as obtained by translating), simply use:
+
+```shell
+./sikso2 -R <binary_file>
+```
+
+### Run assembly file
+
+The best way to run an assembly file is to use:
 
 ```shell
 ./sikso2 -s -r test.asm
@@ -70,6 +80,32 @@ Also, you can print out memory ranges:
 ```
 
 This command will print out memory from `0x0600` to (and including) `0x060a`, but also a byte on `0x0700`.
+
+## Memory
+
+### Load image
+
+You can also manipulate memory that will be used in the device. To load an image to RAM, use:
+
+```shell
+./sikso2 -s -r test.asm -f 0x0700:<file>
+```
+
+This will load contents of `<file>` to RAM at address `0x0700`.
+
+### Load bytes
+
+You can also load byte-by-byte to RAM, using the following syntax:
+
+```shell
+./sikso2 -s -r test.asm -b 0x0700:0e,0x0702:ff
+```
+
+This will load byte `0x0e` at address `0x0700` and byte `0xff` at address `0x0702` in RAM.
+
+### Load order
+
+Keep in mind that sikso2 will first load the RAM image, then binary, and then bytes. So, you can overwrite loaded RAM image with binary, and tweak both image and binary with single bytes.
 
 ## Help
 

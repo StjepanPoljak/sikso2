@@ -3,6 +3,7 @@
 #include <getopt.h>
 #include <stdbool.h>
 #include <string.h>
+#include <errno.h>
 
 #include "translator.h"
 #include "device.h"
@@ -24,6 +25,14 @@ extern void init_cpu_6502_actions(void);
 
 /* ======= run device ======= */
 
+static int mem_byte_op(struct mem_byte_t* curr, void* data) {
+
+	mtrace("Loading byte %.2x at address %.4x", curr->byte, curr->addr);
+
+	return load_to_ram((struct device_t*)data, curr->addr,
+			   &curr->byte, 1, false);
+}
+
 static int main_run_device(unsigned int len, const uint8_t* out, void* data) {
 	struct device_t device;
 	struct cpu_6502_t cpu;
@@ -42,15 +51,49 @@ static int main_run_device(unsigned int len, const uint8_t* out, void* data) {
 		    get_zero_page(((settings_t*)data)),
 		    get_page_size(((settings_t*)data)));
 
+	/* load ram image, if any */
+	if (((settings_t*)data)->mimage) {
+		mtracei("Loading RAM image to %.4x.", ((settings_t*)data)->mimage->addr);
+		ret = load_to_ram(&device, ((settings_t*)data)->mimage->addr,
+				((settings_t*)data)->mimage->contents,
+				((settings_t*)data)->mimage->length, false);
+		if (ret)
+			return ret;
+	}
+
+	/* load binary */
 	ret = load_to_ram(&device, get_load_addr(((settings_t*)data)),
-			  out, len);
+			  out, len, true);
 	if (ret)
 		return ret;
+
+	/* load other bytes to RAM, if any */
+	if (((settings_t*)data)->mbhead) {
+		mtracei("Loading bytes to RAM...");
+		ret = do_for_each_mem_byte(((settings_t*)data)->mbhead,
+					   mem_byte_op, (void*)(&device));
+	}
 
 	run_device(&device,
 		   ((settings_t*)data)->end_on_final_instr,
 		   ((settings_t*)data)->cpu_dump_mode,
 		   ((settings_t*)data)->mrhead);
+
+	return ret;
+}
+
+static int run_binary(const char* infile, settings_t* settings) {
+	int ret;
+	uint8_t* out;
+	unsigned int fsize;
+
+	out = load_file(infile, &fsize);
+	if (!out)
+		return -1;
+
+	ret = main_run_device(fsize, out, (void*)settings);
+
+	free(out);
 
 	return ret;
 }
@@ -138,18 +181,22 @@ static int translate_file(const char* infile, const char* outfile,
 typedef enum {
 	MAIN_ACTION_TRANSLATE,
 	MAIN_ACTION_RUN,
+	MAIN_ACTION_RUN_BINARY,
 	MAIN_ACTION_HELP,
 	MAIN_ACTION_NONE
 } main_action_t;
 
 static struct option long_options[] = {
-	{ "run",	required_argument,	0, 'r' },
+	{ "run-asm",	required_argument,	0, 'r' },
+	{ "run-bin",	required_argument,	0, 'R' },
 	{ "zero-page",	required_argument,	0, 'z' },
 	{ "page-size",	required_argument,	0, 'p' },
 	{ "load-addr",	required_argument,	0, 'a' },
 	{ "stop",	no_argument,		0, 's' },
 	{ "dump-cpu",	no_argument,		0, 'd' },
 	{ "dump-mem",	required_argument,	0, 'm' },
+	{ "ram-bytes",	required_argument,	0, 'b' },
+	{ "ram-file",	required_argument,	0, 'f' },
 	{ "translate",	required_argument,	0, 't' },
 	{ "output",	required_argument,	0, 'o' },
 	{ "help",	required_argument,	0, 'h' },
@@ -207,7 +254,10 @@ static void print_help(void) {
 	while (i < (sizeof(long_options) / sizeof(struct option) - 1)) {
 		switch(long_options[i].val) {
 		case 'r':
-			help_text("run file");
+			help_text("run assembly file");
+			break;
+		case 'R':
+			help_text("run binary file");
 			break;
 		case 'z':
 			help_text(Z_HELP_STR(DEFAULT_ZERO_PAGE));
@@ -230,6 +280,12 @@ static void print_help(void) {
 		case 'm':
 			help_text("dump memory (e.g. 0x0600-0x060a,0x0700)");
 			break;
+		case 'b':
+			help_text("load bytes to RAM (e.g. 0x0700:0e,0x0702:ff)");
+			break;
+		case 'f':
+			help_text("load file to RAM (e.g. 0x0700:file_name)");
+			break;
 		case 't':
 			help_text("translate file to binary");
 			break;
@@ -240,6 +296,7 @@ static void print_help(void) {
 			help_text("print help");
 			break;
 		default:
+			help_text("no help");
 			break;
 		}
 
@@ -251,9 +308,9 @@ static void print_help(void) {
 	return;
 }
 
-static void on_err(int errno) {
+static void on_err(int merrno) {
 
-	logm_err("Could not parse argument (%s)", strerror(errno));
+	logm_err("Could not parse argument (%s)", strerror(merrno));
 
 	return;
 }
@@ -265,8 +322,8 @@ static int parse_arg(const char* str) {
 
 #define IMPROPER_USAGE \
 	printf("Improper usage. Try -h for help.\n"); \
-	return -1
-
+	ret = -1; \
+	goto exit_main;
 
 int main(int argc, char* const argv[]) {
 	int opt;
@@ -277,6 +334,9 @@ int main(int argc, char* const argv[]) {
 	int option_index = 0;
 	bool run_setting;
 	bool tra_setting;
+	int ret;
+
+	ret = 0;
 
 	infile = NULL;
 	outfile = NULL;
@@ -287,7 +347,7 @@ int main(int argc, char* const argv[]) {
 
 	init_settings(&settings);
 
-	while ((opt = getopt_long(argc, argv, "r:z:p:a:sd:m:t:o:h",
+	while ((opt = getopt_long(argc, argv, "r:R:z:p:a:sd:m:b:f:t:o:h",
 				  long_options, &option_index)) != -1) {
 		switch (opt) {
 
@@ -297,6 +357,14 @@ int main(int argc, char* const argv[]) {
 				IMPROPER_USAGE;
 			}
 			action = MAIN_ACTION_RUN;
+			break;
+
+		case 'R':
+			infile = optarg;
+			if (action != MAIN_ACTION_NONE) {
+				IMPROPER_USAGE;
+			}
+			action = MAIN_ACTION_RUN_BINARY;
 			break;
 
 		case 'z':
@@ -326,6 +394,28 @@ int main(int argc, char* const argv[]) {
 
 		case 'm':
 			settings.mrhead = parse_mem_region(optarg);
+			if (!settings.mrhead) {
+				ret = -1;
+				goto exit_main;
+			}
+			run_setting = true;
+			break;
+
+		case 'b':
+			settings.mbhead = parse_mem_bytes(optarg);
+			if (!settings.mbhead) {
+				ret = -1;
+				goto exit_main;
+			}
+			run_setting = true;
+			break;
+
+		case 'f':
+			settings.mimage = get_mem_image(optarg);
+			if (!settings.mimage) {
+				ret = -1;
+				goto exit_main;
+			}
 			run_setting = true;
 			break;
 
@@ -376,7 +466,17 @@ int main(int argc, char* const argv[]) {
 			IMPROPER_USAGE;
 		}
 
-		return translate_file(infile, outfile, &settings);
+		ret = translate_file(infile, outfile, &settings);
+		break;
+
+	case MAIN_ACTION_RUN_BINARY:
+
+		if (tra_setting) {
+			IMPROPER_USAGE;
+		}
+
+		ret = run_binary(infile, &settings);
+		break;
 
 	case MAIN_ACTION_RUN:
 
@@ -384,11 +484,16 @@ int main(int argc, char* const argv[]) {
 			IMPROPER_USAGE;
 		}
 
-		return run_action(infile, &settings);
+		ret = run_action(infile, &settings);
+		break;
 
 	case MAIN_ACTION_NONE:
 		IMPROPER_USAGE;
 	}
 
-	return 0;
+exit_main:
+
+	free_settings(&settings);
+
+	return ret;
 }
