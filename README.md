@@ -33,7 +33,11 @@ Note: You can turn off any of these options by either deleting them or, preferra
 
 ## Build
 
-To build the program, simply use `make`.
+To build the program, simply run `make`. This will use the provided (default) configuration file `config.txt`. To use a custom configuration file:
+
+```shell
+make CONFIG_FILE=<custom_config_file>
+```
 
 ## Translation
 
