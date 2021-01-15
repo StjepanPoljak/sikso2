@@ -129,8 +129,6 @@ typedef struct {
 	regex_t acc_re;
 
 	unsigned int load_addr;
-	unsigned int zero_page;
-	unsigned int page_size;
 
 	unsigned int curr_addr;
 	unsigned int total_len;
@@ -389,11 +387,8 @@ static void remove_pending_label(struct instr_el_t* iel) {
 
 static int translate_instr(translator_t* trans, struct instr_el_t* iel,
 			    uint8_t mcode[MAX_INSTR_LENGTH]) {
-	uint8_t i;
-	unsigned int s; /* shift */
 	int ret;
 
-	s = 0;
 	if (iel->label_pending) {
 
 		ret = get_lbl_addr(trans, iel->label_pending);
@@ -405,18 +400,32 @@ static int translate_instr(translator_t* trans, struct instr_el_t* iel,
 		}
 		else {
 			iel->arg = (uint16_t)ret;
-			ttrace("Found label: %s (%.4x).", iel->label_pending, iel->arg);
+			ttrace("Found label: %s (%.4x).",
+			       iel->label_pending, iel->arg);
 			remove_pending_label(iel);
 		}
 	}
 
 	mcode[0] = (uint8_t)iel->opcode;
 
-	for (i = iel->length - 1; i >= 1; i--) {
-		s = (((iel->length - i) - 1) * 8);
-		mcode[i] = (uint8_t)(((iel->arg & ((uint16_t)0xFF << s)) >> s));
+	switch (iel->length) {
+	case 2:
+		mcode[1] = (uint8_t)(iel->arg & 0xFF);
+		break;
+	case 3:
+		mcode[1] = (uint8_t)(iel->arg & 0xFF);
+		mcode[2] = (uint8_t)((iel->arg & 0xFF00) >> 8);
+		break;
+	default:
+		break;
 	}
-
+/*
+	for (i = 1; i < iel->length; i++) {
+		s = (((iel->length - i) - 1) * 8);
+		mcode[i] = (uint8_t)(((iel->arg &
+			  ((uint16_t)0xFF << s)) >> s));
+	}
+*/
 	return 0;
 }
 
@@ -523,7 +532,8 @@ static int get_arg(translator_t* trans, const char* str) {
 	if (ret == TRANS_ERROR_FAIL) return ret; \
 	else if (ret > 0) new_instr->arg = ret;
 
-static int get_length_set_opcode(struct instr_el_t* new_instr, instr_mode_t mode) {
+static int get_length_set_opcode(struct instr_el_t* new_instr,
+				 instr_mode_t mode) {
 	subinstr_t* s;
 	int ret;
 
@@ -577,10 +587,9 @@ static int handle_arg(translator_t* trans, struct instr_el_t* new_instr,
 		ttrace("Zero page / Absolute: %s", match_buff);
 		set_new_instr_arg(match_buff);
 
-		if (ret != TRANS_ERROR_MAYBE_LABEL)
-			mode = new_instr->arg >= trans->zero_page
-			     + trans->page_size
-			     ? MODE_ABSOLUTE : MODE_ZERO_PAGE;
+		if (ret != TRANS_ERROR_MAYBE_LABEL) {
+			mode = (new_instr->arg & 0xFF00) 
+			     ? MODE_ABSOLUTE : MODE_ZERO_PAGE; }
 		else {
 			mode = MODE_ABSOLUTE;
 			set_label_pending(new_instr, match_buff);
@@ -601,8 +610,7 @@ static int handle_arg(translator_t* trans, struct instr_el_t* new_instr,
 		get_pmatch_to(match_buff, 2);
 		ttrace("Register: %s", match_buff);
 		if (ret != TRANS_ERROR_MAYBE_LABEL)
-			mode = new_instr->arg >= trans->zero_page
-			     + trans->page_size
+			mode = (new_instr->arg & 0xFF00)
 			     ? (match_buff[0] == 'X'
 					? MODE_ABSOLUTE_X
 					: MODE_ABSOLUTE_Y)
@@ -768,8 +776,9 @@ static void dump_instr_list(translator_t* trans) {
 			mcode_print |= mcode[i];
 		}
 
-		ttrace("%.4x: %x (%c%c%c %u) (len=%u)", curr->addr, mcode_print,
-		       instr_name_to_chars(curr), curr->arg, curr->length);
+		ttrace("%.4x: %x (%c%c%c %u) (len=%u)", curr->addr,
+		       mcode_print, instr_name_to_chars(curr),
+		       curr->arg, curr->length);
 	}
 }
 #endif
@@ -806,7 +815,6 @@ static int dump_binary(translator_t* trans, uint8_t** out) {
 }
 
 int translate(const char* infile, unsigned int load_addr,
-	      unsigned int zero_page, unsigned int page_size,
 	      int(*op)(unsigned int, const uint8_t*, void*),
 	      void *data) {
 	translator_t trans;
@@ -825,8 +833,6 @@ int translate(const char* infile, unsigned int load_addr,
 	ret = 0;
 	trans.load_addr = load_addr;
 	trans.curr_addr = load_addr;
-	trans.zero_page = zero_page;
-	trans.page_size = page_size;
 	trans.total_len = 0;
 	trans.infile = infile;
 
@@ -854,7 +860,11 @@ int translate(const char* infile, unsigned int load_addr,
 		entered_comment = false;
 		started_newl = true;
 
-		while (curr != '\n' && curr != EOF && curr != ':') {
+		while (curr != '\n' && curr != EOF) {
+
+			if (curr == ':' && !entered_comment)
+				break;
+
 			curr = fgetc(f);
 
 			if (started_newl && (curr == '\t' || curr == ' '))
@@ -878,15 +888,14 @@ int translate(const char* infile, unsigned int load_addr,
 				goto exit_translator;
 			}
 
-			if (!entered_comment && curr != '\n' && curr != EOF)
+			if ((!entered_comment) && curr != '\n' && curr != EOF)
 				line_buffer[last++] = curr;
 		}
 
 		line++;
 
-		if (last <= 1) {
-			continue;
-		}
+		if (last <= 1)
+			goto cont;
 
 		ret = handle_line(&trans, line_buffer);
 
@@ -896,7 +905,7 @@ int translate(const char* infile, unsigned int load_addr,
 
 			goto exit_translator;
 		}
-
+cont:
 		for (i = 0; i <= last; i++)
 			line_buffer[i] = 0;
 	}

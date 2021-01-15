@@ -2,9 +2,9 @@
 
 _start:
 	LDA #$66
-	ASL A
+	ASL
 	STA $0e
 	LDA #$11
 	ADC $0e
-_end:	NOP ; test label
-	;JMP _end
+_end:	NOP
+	JMP _start

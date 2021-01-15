@@ -128,12 +128,12 @@ class Sikso2Code():
     @staticmethod
     def make():
         subprocess.run(['make', 'clean'], capture_output=True)
-        subprocess.run(['make', 'CONFIG_FILE=tests/config.txt'],
+        subprocess.run(['make', 'CONFIG_FILE=tests/config_unit_tests.txt'],
                 capture_output=True)
 
     def run(self):
         fd, path = tempfile.mkstemp()
-        mandatory = ['./sikso2', '-r', path, '-s', '-d', 'oneline']
+        mandatory = ['./sikso2', '-r', path, '-S', '-d', 'oneline']
         full_run = (['valgrind'] if self.leak_check else []) \
                  + mandatory + self.args
 

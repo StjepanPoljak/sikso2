@@ -47,9 +47,10 @@ static int main_run_device(unsigned int len, const uint8_t* out, void* data) {
 	mtracei("Initializing device.");
 
 	init_cpu(&cpu, get_instr_list());
-	init_device(&device, &cpu, get_load_addr(((settings_t*)data)),
-		    get_zero_page(((settings_t*)data)),
-		    get_page_size(((settings_t*)data)));
+	init_device(&device, &cpu,
+		    get_load_addr(((settings_t*)data)),
+		    get_stack_addr(((settings_t*)data)),
+		    get_ram_size(((settings_t*)data)));
 
 	/* load ram image, if any */
 	if (((settings_t*)data)->mimage) {
@@ -100,10 +101,7 @@ static int run_binary(const char* infile, settings_t* settings) {
 
 static int run_action(const char* infile, settings_t* settings) {
 
-	return translate(infile, get_load_addr(settings),
-			 get_zero_page(settings),
-			 get_page_size(settings),
-			 main_run_device, (void*)settings);
+	return translate(infile, get_load_addr(settings), main_run_device, (void*)settings);
 }
 
 /* ======= debug ======= */
@@ -173,8 +171,6 @@ static int translate_file(const char* infile, const char* outfile,
 	td.outfile = outfile ?: default_outfile;
 
 	return translate(td.infile, get_load_addr(settings),
-			 get_zero_page(settings),
-			 get_page_size(settings),
 			 export_binary, &td);
 }
 
@@ -189,10 +185,10 @@ typedef enum {
 static struct option long_options[] = {
 	{ "run-asm",	required_argument,	0, 'r' },
 	{ "run-bin",	required_argument,	0, 'R' },
-	{ "zero-page",	required_argument,	0, 'z' },
-	{ "page-size",	required_argument,	0, 'p' },
 	{ "load-addr",	required_argument,	0, 'a' },
-	{ "stop",	no_argument,		0, 's' },
+	{ "stack-addr",	required_argument,	0, 's' },
+	{ "ram-size",	required_argument,	0, 'M' },
+	{ "stop",	no_argument,		0, 'S' },
 	{ "dump-cpu",	no_argument,		0, 'd' },
 	{ "dump-mem",	required_argument,	0, 'm' },
 	{ "ram-bytes",	required_argument,	0, 'b' },
@@ -229,14 +225,14 @@ static void print_option_help(struct option* opt, char* help_string) {
 
 #define TEX(A) #A
 
-#define Z_HELP_STR(ZERO_PAGE) \
-	"zero page (default: " TEX(ZERO_PAGE) ")"
-
-#define P_HELP_STR(PAGE_SIZE) \
-	"page size (default: " TEX(PAGE_SIZE) ")"
+#define S_HELP_STR(STACK_ADDR) \
+	"stack address (default: " TEX(STACK_ADDR) ")"
 
 #define A_HELP_STR(LOAD_ADDR) \
 	"load addr (default: " TEX(LOAD_ADDR) ")"
+
+#define M_HELP_STR(RAM_SIZE) \
+	"ram size in bytes (default: " TEX(RAM_SIZE) ")"
 
 static void print_help(void) {
 	unsigned int i;
@@ -259,16 +255,16 @@ static void print_help(void) {
 		case 'R':
 			help_text("run binary file");
 			break;
-		case 'z':
-			help_text(Z_HELP_STR(DEFAULT_ZERO_PAGE));
-			break;
-		case 'p':
-			help_text(P_HELP_STR(DEFAULT_PAGE_SIZE));
-			break;
 		case 'a':
 			help_text(A_HELP_STR(DEFAULT_LOAD_ADDR));
 			break;
 		case 's':
+			help_text(S_HELP_STR(DEFAULT_STACK_ADDR));
+			break;
+		case 'M':
+			help_text(M_HELP_STR(DEFAULT_RAM_SIZE));
+			break;
+		case 'S':
 			help_text("stop after last instruction");
 			break;
 		case 'd':
@@ -281,7 +277,8 @@ static void print_help(void) {
 			help_text("dump memory (e.g. 0x0600-0x060a,0x0700)");
 			break;
 		case 'b':
-			help_text("load bytes to RAM (e.g. 0x0700:0e,0x0702:ff)");
+			help_text("load bytes to RAM "
+				  "(e.g. 0x0700:0e,0x0702:ff)");
 			break;
 		case 'f':
 			help_text("load file to RAM (e.g. 0x0700:file_name)");
@@ -347,7 +344,7 @@ int main(int argc, char* const argv[]) {
 
 	init_settings(&settings);
 
-	while ((opt = getopt_long(argc, argv, "r:R:z:p:a:sd:m:b:f:t:o:h",
+	while ((opt = getopt_long(argc, argv, "r:R:a:SM:s:d:m:b:f:t:o:h",
 				  long_options, &option_index)) != -1) {
 		switch (opt) {
 
@@ -367,22 +364,19 @@ int main(int argc, char* const argv[]) {
 			action = MAIN_ACTION_RUN_BINARY;
 			break;
 
-		case 'z':
-			settings.zero_page = (uint16_t)parse_arg(optarg);
-			run_setting = true;
-			break;
-
-		case 'p':
-			settings.page_size = (uint16_t)parse_arg(optarg);
-			run_setting = true;
-			break;
-
 		case 'a':
 			settings.load_addr = (uint16_t)parse_arg(optarg);
+			break;
+		case 's':
+			settings.stack_addr = (uint16_t)parse_arg(optarg);
+			run_setting = true;
+			break;
+		case 'M':
+			settings.ram_size = (uint16_t)parse_arg(optarg);
 			run_setting = true;
 			break;
 
-		case 's':
+		case 'S':
 			settings.end_on_final_instr = true;
 			run_setting = true;
 			break;

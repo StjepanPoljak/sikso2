@@ -10,12 +10,12 @@ File `config.txt` contains build-time configuration options for sikso2. Mandator
 
 ```
 DEFAULT_LOAD_ADDR=0x0600
-DEFAULT_ZERO_PAGE=0x0
-DEFAULT_PAGE_SIZE=256
+DEFAULT_STACK_ADDR=0x0200
+DEFAULT_RAM_SIZE=8192
 DEFAULT_DUMP_MEM_COLS=5
 ```
 
-You can, of course, change these to your preference. Note that some of them are still not fully functional, such as `DEFAULT_ZERO_PAGE`, as emulator still does run-time checks for `0x00` to `0xFF` address range in certain places.
+You can, of course, change these to your preference. Note that some of them are still not fully functional.
 
 Debug and trace options that can be removed include:
 
@@ -24,6 +24,7 @@ MAIN_TRACE
 CPU_TRACE
 DEVICE_TRACE
 TRANSLATOR_TRACE
+CLOCK_TRACE
 SAFEGUARD=1000
 ```
 
@@ -64,23 +65,23 @@ To run binary (e.g. as obtained by translating), simply use:
 The best way to run an assembly file is to use:
 
 ```shell
-./sikso2 -s -r test.asm
+./sikso2 -S -r test.asm
 ```
 
-This will translate `test.asm` to binary and then run it in the emulator. The `-s` option will stop the emulation when the last instruction is reached. Needless to say, this is problematic if an infinite loop is involved. But, it is useful for debug and simple programs.
+This will translate `test.asm` to binary and then run it in the emulator. The `-S` option will stop the emulation when the last instruction is reached. Needless to say, this is problematic if an infinite loop is involved. But, it is useful for debug and simple programs.
 
 ## Dumps
 
 You can see the state of CPU registers when execution stops:
 
 ```shell
-./sikso2 -s -r test.asm -d pretty
+./sikso2 -S -r test.asm -d pretty
 ```
 
 Also, you can print out memory ranges:
 
 ```shell
-./sikso2 -s -r test.asm -m 0x0600-0x060a,0x0700
+./sikso2 -S -r test.asm -m 0x0600-0x060a,0x0700
 ```
 
 This command will print out memory from `0x0600` to (and including) `0x060a`, but also a byte on `0x0700`.
@@ -92,7 +93,7 @@ This command will print out memory from `0x0600` to (and including) `0x060a`, bu
 You can also manipulate memory that will be used in the device. To load an image to RAM, use:
 
 ```shell
-./sikso2 -s -r test.asm -f 0x0700:<file>
+./sikso2 -S -r test.asm -f 0x0700:<file>
 ```
 
 This will load contents of `<file>` to RAM at address `0x0700`.
@@ -102,7 +103,7 @@ This will load contents of `<file>` to RAM at address `0x0700`.
 You can also load byte-by-byte to RAM, using the following syntax:
 
 ```shell
-./sikso2 -s -r test.asm -b 0x0700:0e,0x0702:ff
+./sikso2 -S -r test.asm -b 0x0700:0e,0x0702:ff
 ```
 
 This will load byte `0x0e` at address `0x0700` and byte `0xff` at address `0x0702` in RAM.
@@ -118,3 +119,25 @@ For further CPU dump options and other switches, use:
 ```shell
 ./sikso2 -h
 ```
+
+## Tests
+
+As of now, two tests are available. Unit tests and a performance tests.
+
+### Unit tests
+
+While unit tests are still not complete, they can be quite useful in determining potential issues when doing large structural changes in the code. You can run them with:
+
+```shell
+./tests/unit_tests.py
+```
+
+### Performance test
+
+A performance test will calculate average time required per instruction based on the simple `test.asm` file. You can run the test with:
+
+```shell
+SLEEP_TIME=<no_of_sec> ./tests/perf_test.sh
+```
+
+The default for `SLEEP_TIME` is 5 seconds, and I recommend it, as parsing the clock trace output via `sed` can take some time.

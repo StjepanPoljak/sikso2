@@ -29,8 +29,7 @@ void print_hex(const uint8_t* bin, unsigned int len, unsigned int offset) {
 void init_settings(settings_t* settings) {
 
 	settings->load_addr = -1;
-	settings->zero_page = -1;
-	settings->page_size = -1;
+	settings->stack_addr = -1;
 	settings->end_on_final_instr = false;
 	settings->cpu_dump_mode = CPU_DUMP_NONE;
 	settings->mrhead = NULL;

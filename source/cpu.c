@@ -33,13 +33,13 @@ void init_cpu(struct cpu_6502_t* cpu, instr_t* instr_list) {
 	return;
 }
 
-void start_cpu(struct cpu_6502_t* cpu, uint16_t zero_page,
-	       uint16_t page_size, uint16_t load_addr) {
+void start_cpu(struct cpu_6502_t* cpu, uint16_t load_addr,
+	       uint16_t stack_addr) {
 
 	cpu->A = 0x0;
 	cpu->X = 0x0;
 	cpu->Y = 0x0;
-	cpu->S = zero_page + page_size * 2;
+	cpu->S = stack_addr;
 	cpu->P = (uint8_t)1 << 5;
 	cpu->PC = load_addr;
 

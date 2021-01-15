@@ -67,90 +67,43 @@ extern instr_t* get_instr_list(void);
 			set_V(cpu); \
 	else clr_V(cpu)*/
 
-static uint16_t get_page(struct device_t* device, uint16_t addr) {
+#define get_page(addr) ((addr) & 0xFF00)
 
-	return (addr - device->ram.zero_page) / device->ram.page_size;
-}
+#define zero_page_wrap_around(addr) ((addr) & 0xFF)
 
-static uint16_t zero_page_wrap_around(struct device_t* device,
-				      uint16_t addr) {
+#define is_page_boundary_crossed(addr) \
+	(get_page(addr) != get_page((addr) + 1))
 
-	if (get_page(device, addr) == 0)
-		return addr;
-
-	return ((addr - device->ram.zero_page) % device->ram.page_size)
-	       + device->ram.zero_page;
-}
-
-static int is_page_boundary_crossed(struct device_t* device, uint16_t addr) {
-
-	if (device->instr_frag.extrcyc)
-		return 0;
-
-	return get_page(device, addr) != get_page(device, addr + 1)
-	     ? DEVICE_NEED_EXTRA_CYCLE : 0;
-}
-
-static int get_indX(struct device_t* device, uint16_t addr,
-		    uint16_t* new_addr) {
+static uint16_t get_indX(struct device_t* device,
+			 uint16_t addr) {
 	uint16_t wrapped;
-	uint8_t low_byte;
-	uint8_t high_byte;
-	int ret;
 
-	ret = 0;
+	wrapped = zero_page_wrap_around(addr + device->cpu->X);
 
-	wrapped = zero_page_wrap_around(device, addr + device->cpu->X);
-
-	ret = device->read(device, wrapped + 1, &high_byte);
-	if (ret)
-		return ret;
-	ret = device->read(device, wrapped, &low_byte);
-	if (ret)
-		return ret;
-
-	*new_addr = ((uint16_t)high_byte << 8) | (uint16_t)low_byte;
-
-	return ret;
+	return ((uint16_t)device_read(device, wrapped + 1) << 8) | (uint16_t)device_read(device, wrapped);
 }
 
-static int get_indY(struct device_t* device, uint16_t addr,
-		    uint16_t* new_addr) {
-	uint8_t low_byte;
-	uint8_t high_byte;
-	int ret;
+static uint16_t get_indY(struct device_t* device, uint16_t addr) {
 
-	ret = 0;
-
-	ret = device->read(device, addr + 1, &high_byte);
-	if (ret)
-		return ret;
-
-	ret = device->read(device, addr, &low_byte);
-	if (ret)
-		return ret;
-
-	*new_addr = ((uint16_t)high_byte << 8) | (uint16_t)low_byte;
-	*new_addr += (uint16_t)device->cpu->Y;
-
-	return is_page_boundary_crossed(device, *new_addr);
+	return (((uint16_t)device_read(device, addr + 1) << 8) | (uint16_t)device_read(device, addr)) + (uint16_t)device->cpu->Y;
 }
 
 static int get_addr(struct device_t* device, uint16_t addr,
 		    instr_mode_t mode, uint16_t* new_addr) {
 	int ret;
 
+	ret = 0;
+
 	switch (mode) {
 
 	case MODE_ZERO_PAGE:
-		assert_zero_page(device, addr);
+		//assert_zero_page(device, addr);
 		*new_addr = addr;
 		break;
 
 	case MODE_ZERO_PAGE_X:
-		assert_zero_page(device, addr);
-		*new_addr = zero_page_wrap_around(device,
-						  addr + device->cpu->X);
+		//assert_zero_page(device, addr);
+		*new_addr = addr + device->cpu->X;
 		break;
 
 	case MODE_ABSOLUTE:
@@ -159,34 +112,21 @@ static int get_addr(struct device_t* device, uint16_t addr,
 
 	case MODE_ABSOLUTE_X:
 		*new_addr = addr + device->cpu->X;
-		ret = is_page_boundary_crossed(device, *new_addr);
+		ret = is_page_boundary_crossed(*new_addr) ? DEVICE_NEED_EXTRA_CYCLE : 0;
 		break;
 
 	case MODE_ABSOLUTE_Y:
 		*new_addr = addr + device->cpu->Y;
-		ret = is_page_boundary_crossed(device, *new_addr);
+		ret = is_page_boundary_crossed(*new_addr) ? DEVICE_NEED_EXTRA_CYCLE : 0;
 		break;
 
 	case MODE_INDIRECT_X:
-		ret = get_indX(device, addr, new_addr);
-		if (ret < 0) {
-			loga_err("Error reading address %d (X=%d)"
-				 "(indexed indirect)", addr,
-				 device->cpu->X);
-
-			return ret;
-		}
+		*new_addr = get_indX(device, addr);
 		break;
 
 	case MODE_INDIRECT_Y:
-		ret = get_indY(device, addr, new_addr);
-		if (ret < 0) {
-			loga_err("Error reading address %d "
-				 "(indirect indexed)", addr);
-
-			return ret;
-		}
-
+		*new_addr = get_indY(device, addr);
+		ret = is_page_boundary_crossed(addr) ? DEVICE_NEED_EXTRA_CYCLE : 0;
 		break;
 	}
 
@@ -197,42 +137,28 @@ static int get_byte(struct device_t* device, uint16_t addr,
 		     instr_mode_t mode, uint8_t* byte) {
 	uint16_t new_addr;
 	int ret;
-	bool boundary_crossed;
 
 	ret = get_addr(device, addr, mode, &new_addr);
 	if (ret < 0)
 		return ret;
-	boundary_crossed = ret == DEVICE_NEED_EXTRA_CYCLE;
 
-	ret = device->read(device, new_addr, byte);
-	if (ret < 0) {
-		loga_err("Error reading address %d", new_addr);
+	*byte = device_read(device, new_addr);
 
-		return ret;
-	}
-
-	return boundary_crossed ? DEVICE_NEED_EXTRA_CYCLE : ret;
+	return ret;
 }
 
 static int write_byte(struct device_t* device, uint16_t addr,
 		      instr_mode_t mode, uint8_t byte) {
 	uint16_t new_addr;
 	int ret;
-	bool boundary_crossed;
 
 	ret = get_addr(device, addr, mode, &new_addr);
 	if (ret < 0)
 		return ret;
-	boundary_crossed = ret == DEVICE_NEED_EXTRA_CYCLE;
 
-	ret = device->write(device, new_addr, byte);
-	if (ret < 0) {
-		loga_err("Error writing %.2x to address %d", byte, new_addr);
+	device_write(device, new_addr, byte);
 
-		return ret;
-	}
-
-	return boundary_crossed ? DEVICE_NEED_EXTRA_CYCLE : ret;
+	return ret;
 }
 
 DEFINE_ACTION(ADC) {
@@ -629,7 +555,7 @@ DEFINE_ACTION(JMP) {
 			return ret;
 
 		ret = get_byte(_device,
-			zero_page_wrap_around(_device, arg + 1),
+			zero_page_wrap_around(arg + 1),
 			_mode, &high_byte);
 		if (ret)
 			return ret;

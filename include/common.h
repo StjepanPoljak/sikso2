@@ -20,18 +20,18 @@
 	settings->load_addr < 0 ? DEFAULT_LOAD_ADDR \
 				: (uint16_t)settings->load_addr
 
-#define get_zero_page(settings) \
-	settings->zero_page < 0 ? DEFAULT_ZERO_PAGE \
-				: (uint16_t)settings->zero_page
+#define get_ram_size(settings) \
+	settings->ram_size < 0 ? DEFAULT_RAM_SIZE \
+			       : (uint16_t)settings->ram_size
 
-#define get_page_size(settings) \
-	settings->page_size < 0 ? DEFAULT_PAGE_SIZE \
-				: (uint16_t)settings->page_size
+#define get_stack_addr(settings) \
+	settings->stack_addr < 0 ? DEFAULT_STACK_ADDR \
+				 : (uint16_t)settings->stack_addr
 
 typedef struct {
 	int32_t load_addr;
-	int32_t zero_page;
-	int32_t page_size;
+	int32_t stack_addr;
+	int32_t ram_size;
 	bool end_on_final_instr;
 	cpu_dump_mode_t cpu_dump_mode;
 	struct mem_region_t* mrhead;
