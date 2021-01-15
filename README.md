@@ -132,6 +132,8 @@ While unit tests are still not complete, they can be quite useful in determining
 ./tests/unit_tests.py
 ```
 
+Note: Unit tests also contain memory leak tests so make sure `valgrind` is installed before running.
+
 ### Performance test
 
 A performance test will calculate average time required per instruction based on the simple `test.asm` file. You can run the test with:

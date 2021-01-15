@@ -82,7 +82,8 @@ int load_to_ram(struct device_t* device, uint16_t load_addr,
 	((device)->cpu->instr_map[opc].subinstr->mode & 0xFF)
 
 #define run_action(device, opc, arg, data) \
-	device->cpu->instr_map[opc].instr->action(device->cpu->instr_map[opc].subinstr, arg, data)
+	device->cpu->instr_map[opc].instr->action( \
+		device->cpu->instr_map[opc].subinstr, arg, data)
 
 typedef union {
 	uint16_t arg;
@@ -162,8 +163,8 @@ int run_device(struct device_t* device,
 			arg = (uint16_t)device->ram.ram[device->cpu->PC++];
 			break;
 		case 3:
-			arg = ((arg_conv_t*)(&(device->ram.ram[device->cpu->PC])))->arg; //(device->ram.ram[device->cpu->PC++] << 8);
-			//arg |= device->ram.ram[device->cpu->PC++];
+			arg = ((arg_conv_t*)
+			     (&(device->ram.ram[device->cpu->PC])))->arg;
 			device->cpu->PC += 2;
 			break;
 		default:
@@ -180,7 +181,8 @@ int run_device(struct device_t* device,
 #endif
 
 #ifdef CLOCK_TRACE
-		printf("Cycle lasted %ldns.\n", cycle_end.tv_nsec - cycle_start.tv_nsec);
+		printf("Cycle lasted %ldns.\n",
+		       cycle_end.tv_nsec - cycle_start.tv_nsec);
 #endif
 	}
 

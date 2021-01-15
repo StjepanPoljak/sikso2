@@ -64,7 +64,8 @@ class Sikso2CPU():
 class Sikso2Code():
 
     error_re = re.compile('^\[[A-Z]..\] \(!\) (.*)$')
-    leak_re = re.compile('^==[0-9]+== All heap blocks were freed -- no leaks are possible$')
+    leak_re = re.compile('^==[0-9]+== All heap blocks were freed '
+                         '-- no leaks are possible$')
 
     def __init__(self, name, contents, args=[], leak_check=False):
         self.name = name
@@ -165,12 +166,14 @@ class Sikso2Tests(unittest.TestCase):
     def assertCPUStatusBitsSet(self, sikso2code, bits):
         Logger.logt('Checking if status bits {} are set...'.format(bits))
         for bit in bits:
-            self.assertNotEqual(sikso2code.sikso2cpu.cpu_data['P'] & (1 << bit), 0)
+            self.assertNotEqual(sikso2code.sikso2cpu.cpu_data['P']
+                                & (1 << bit), 0)
 
     def assertCPUStatusBitsClear(self, sikso2code, bits):
         Logger.logt('Checking if status bits {} are clear...'.format(bits))
         for bit in bits:
-            self.assertEqual(sikso2code.sikso2cpu.cpu_data['P'] & (1 << bit), 0)
+            self.assertEqual(sikso2code.sikso2cpu.cpu_data['P']
+                                & (1 << bit), 0)
 
     def assertFoundError(self, sikso2code, err_msg):
         Logger.logt('Checking if "{}" error is found...'.format(err_msg))

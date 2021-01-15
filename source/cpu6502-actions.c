@@ -57,13 +57,15 @@ extern instr_t* get_instr_list(void);
 	else set_C(cpu)
 
 #define check_overflow_adc(cpu, x, y) \
-	if (get_sign(x) == get_sign(y) && get_sign(x + y + get_C(cpu)) != get_sign(x)) \
+	if (get_sign(x) == get_sign(y) \
+	 && get_sign(x + y + get_C(cpu)) != get_sign(x)) \
 			set_V(cpu); \
 	else clr_V(cpu)
 
 #define check_overflow_sbc(cpu, x, y) \
 	check_overflow_adc(cpu, x, 255-y)
-	/*if (get_sign(x) != get_sign(y) && get_sign(x - y + get_C(cpu) - 1) != get_sign(x)) \
+	/*if (get_sign(x) != get_sign(y) \
+	   && get_sign(x - y + get_C(cpu) - 1) != get_sign(x)) \
 			set_V(cpu); \
 	else clr_V(cpu)*/
 
@@ -80,12 +82,15 @@ static uint16_t get_indX(struct device_t* device,
 
 	wrapped = zero_page_wrap_around(addr + device->cpu->X);
 
-	return ((uint16_t)device_read(device, wrapped + 1) << 8) | (uint16_t)device_read(device, wrapped);
+	return ((uint16_t)device_read(device, wrapped + 1) << 8) 
+	      | (uint16_t)device_read(device, wrapped);
 }
 
 static uint16_t get_indY(struct device_t* device, uint16_t addr) {
 
-	return (((uint16_t)device_read(device, addr + 1) << 8) | (uint16_t)device_read(device, addr)) + (uint16_t)device->cpu->Y;
+	return (((uint16_t)device_read(device, addr + 1) << 8)
+	       | (uint16_t)device_read(device, addr))
+	       + (uint16_t)device->cpu->Y;
 }
 
 static int get_addr(struct device_t* device, uint16_t addr,

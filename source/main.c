@@ -54,7 +54,8 @@ static int main_run_device(unsigned int len, const uint8_t* out, void* data) {
 
 	/* load ram image, if any */
 	if (((settings_t*)data)->mimage) {
-		mtracei("Loading RAM image to %.4x.", ((settings_t*)data)->mimage->addr);
+		mtracei("Loading RAM image to %.4x.",
+			((settings_t*)data)->mimage->addr);
 		ret = load_to_ram(&device, ((settings_t*)data)->mimage->addr,
 				((settings_t*)data)->mimage->contents,
 				((settings_t*)data)->mimage->length, false);
@@ -101,7 +102,8 @@ static int run_binary(const char* infile, settings_t* settings) {
 
 static int run_action(const char* infile, settings_t* settings) {
 
-	return translate(infile, get_load_addr(settings), main_run_device, (void*)settings);
+	return translate(infile, get_load_addr(settings),
+			 main_run_device, (void*)settings);
 }
 
 /* ======= debug ======= */

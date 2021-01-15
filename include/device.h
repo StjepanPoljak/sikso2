@@ -6,7 +6,6 @@
 
 #include "common.h"
 #include "cpu.h"
-#include "clock.h"
 
 #define DEVICE_TAKE_BRANCH 5
 #define DEVICE_GENERATE_NMI 4
@@ -35,7 +34,8 @@ struct peripheral_t {
 };
 
 #define device_read(device, addr) \
-	((addr) < device->ram.ram_size) ? device->ram.ram[(addr)] : device->read(device, (addr))
+	((addr) < device->ram.ram_size) ? device->ram.ram[(addr)] \
+					: device->read(device, (addr))
 
 #define device_write(device, addr, val) \
 	if (addr < device->ram.ram_size) device->ram.ram[addr] = val; \
@@ -56,7 +56,8 @@ struct device_t {
 };
 
 void init_device(struct device_t* device, struct cpu_6502_t* cpu,
-		 uint16_t load_addr, uint16_t stack_addr, uint16_t ram_size);
+		 uint16_t load_addr, uint16_t stack_addr,
+		 uint16_t ram_size);
 
 int load_to_ram(struct device_t* device, uint16_t load_addr,
 		const uint8_t* data, unsigned int data_size,
