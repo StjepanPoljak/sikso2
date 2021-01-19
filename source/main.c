@@ -176,29 +176,43 @@ static int translate_file(const char* infile, const char* outfile,
 			 export_binary, &td);
 }
 
+static int disassemble_file(const char* infile, settings_t* settings) {
+	DEFINE_INSTR_MAP(instr_map);
+	populate_imap(instr_map);
+
+#ifdef TRANSLATOR_TRACE
+	print_imap(instr_map);
+#endif
+
+	return disassemble(infile, instr_map, settings->dmode);
+}
+
 typedef enum {
 	MAIN_ACTION_TRANSLATE,
 	MAIN_ACTION_RUN,
 	MAIN_ACTION_RUN_BINARY,
+	MAIN_ACTION_DISASSEMBLE,
 	MAIN_ACTION_HELP,
 	MAIN_ACTION_NONE
 } main_action_t;
 
 static struct option long_options[] = {
-	{ "run-asm",	required_argument,	0, 'r' },
-	{ "run-bin",	required_argument,	0, 'R' },
-	{ "load-addr",	required_argument,	0, 'a' },
-	{ "stack-addr",	required_argument,	0, 's' },
-	{ "ram-size",	required_argument,	0, 'M' },
-	{ "stop",	no_argument,		0, 'S' },
-	{ "dump-cpu",	no_argument,		0, 'd' },
-	{ "dump-mem",	required_argument,	0, 'm' },
-	{ "ram-bytes",	required_argument,	0, 'b' },
-	{ "ram-file",	required_argument,	0, 'f' },
-	{ "translate",	required_argument,	0, 't' },
-	{ "output",	required_argument,	0, 'o' },
-	{ "help",	required_argument,	0, 'h' },
-	{ 0,		0,			0,  0  }
+	{ "run-asm",		required_argument,	0, 'r' },
+	{ "run-bin",		required_argument,	0, 'R' },
+	{ "load-addr",		required_argument,	0, 'a' },
+	{ "stack-addr",		required_argument,	0, 's' },
+	{ "ram-size",		required_argument,	0, 'M' },
+	{ "stop",		no_argument,		0, 'S' },
+	{ "dump-cpu",		no_argument,		0, 'd' },
+	{ "dump-mem",		required_argument,	0, 'm' },
+	{ "ram-bytes",		required_argument,	0, 'b' },
+	{ "ram-file",		required_argument,	0, 'f' },
+	{ "translate",		required_argument,	0, 't' },
+	{ "disassemble",	required_argument,	0, 'D' },
+	{ "pretty",		no_argument,		0, 'p' },
+	{ "output",		required_argument,	0, 'o' },
+	{ "help",		required_argument,	0, 'h' },
+	{ 0,			0,			0,  0  }
 };
 
 static void print_option_help(struct option* opt, char* help_string) {
@@ -288,6 +302,12 @@ static void print_help(void) {
 		case 't':
 			help_text("translate file to binary");
 			break;
+		case 'D':
+			help_text("disassemble binary file");
+			break;
+		case 'p':
+			help_text("print binary when disassembling");
+			break;
 		case 'o':
 			help_text("output file name (default: a.out)");
 			break;
@@ -324,6 +344,20 @@ static int parse_arg(const char* str) {
 	ret = -1; \
 	goto exit_main;
 
+typedef enum {
+	SETTING_RUN,
+	SETTING_TRANSLATE,
+	SETTING_DISASSEMBLE,
+	SETTING_NONE
+} setting_category_t;
+
+#define set_setting(sc_old, sc_new) do { \
+	if (sc_old == SETTING_NONE || sc_old == sc_new) { \
+		sc_old = sc_new; \
+	} else { \
+		IMPROPER_USAGE; \
+	} } while(0)
+
 int main(int argc, char* const argv[]) {
 	int opt;
 	char* infile;
@@ -331,8 +365,7 @@ int main(int argc, char* const argv[]) {
 	main_action_t action;
 	settings_t settings;
 	int option_index = 0;
-	bool run_setting;
-	bool tra_setting;
+	setting_category_t sc;
 	int ret;
 
 	ret = 0;
@@ -340,13 +373,11 @@ int main(int argc, char* const argv[]) {
 	infile = NULL;
 	outfile = NULL;
 	action = MAIN_ACTION_NONE;
-
-	run_setting = false;
-	tra_setting = false;
+	sc = SETTING_NONE;
 
 	init_settings(&settings);
 
-	while ((opt = getopt_long(argc, argv, "r:R:a:SM:s:d:m:b:f:t:o:h",
+	while ((opt = getopt_long(argc, argv, "r:R:a:SM:s:d:m:b:f:t:D:po:h",
 				  long_options, &option_index)) != -1) {
 		switch (opt) {
 
@@ -371,21 +402,21 @@ int main(int argc, char* const argv[]) {
 			break;
 		case 's':
 			settings.stack_addr = (uint16_t)parse_arg(optarg);
-			run_setting = true;
+			set_setting(sc, SETTING_RUN);
 			break;
 		case 'M':
 			settings.ram_size = (uint16_t)parse_arg(optarg);
-			run_setting = true;
+			set_setting(sc, SETTING_RUN);
 			break;
 
 		case 'S':
 			settings.end_on_final_instr = true;
-			run_setting = true;
+			set_setting(sc, SETTING_RUN);
 			break;
 
 		case 'd':
 			settings.cpu_dump_mode = parse_cpu_dump_mode(optarg);
-			run_setting = true;
+			set_setting(sc, SETTING_RUN);
 			break;
 
 		case 'm':
@@ -394,7 +425,7 @@ int main(int argc, char* const argv[]) {
 				ret = -1;
 				goto exit_main;
 			}
-			run_setting = true;
+			set_setting(sc, SETTING_RUN);
 			break;
 
 		case 'b':
@@ -403,7 +434,7 @@ int main(int argc, char* const argv[]) {
 				ret = -1;
 				goto exit_main;
 			}
-			run_setting = true;
+			set_setting(sc, SETTING_RUN);
 			break;
 
 		case 'f':
@@ -412,7 +443,7 @@ int main(int argc, char* const argv[]) {
 				ret = -1;
 				goto exit_main;
 			}
-			run_setting = true;
+			set_setting(sc, SETTING_RUN);
 			break;
 
 		case 't':
@@ -423,9 +454,22 @@ int main(int argc, char* const argv[]) {
 			action = MAIN_ACTION_TRANSLATE;
 			break;
 
+		case 'D':
+			infile = optarg;
+			if (action != MAIN_ACTION_NONE) {
+				IMPROPER_USAGE;
+			}
+			action = MAIN_ACTION_DISASSEMBLE;
+			break;
+
+		case 'p':
+			settings.dmode = DISASM_PRETTY;
+			set_setting(sc, SETTING_DISASSEMBLE);
+			break;
+
 		case 'o':
 			outfile = optarg;
-			tra_setting = true;
+			set_setting(sc, SETTING_TRANSLATE);
 			break;
 
 		case 'h':
@@ -448,7 +492,7 @@ int main(int argc, char* const argv[]) {
 
 	case MAIN_ACTION_HELP:
 
-		if (run_setting || tra_setting) {
+		if (sc != SETTING_NONE) {
 			IMPROPER_USAGE;
 		}
 
@@ -458,7 +502,7 @@ int main(int argc, char* const argv[]) {
 
 	case MAIN_ACTION_TRANSLATE:
 
-		if (run_setting) {
+		if (sc != SETTING_NONE && sc != SETTING_TRANSLATE) {
 			IMPROPER_USAGE;
 		}
 
@@ -467,7 +511,7 @@ int main(int argc, char* const argv[]) {
 
 	case MAIN_ACTION_RUN_BINARY:
 
-		if (tra_setting) {
+		if (sc != SETTING_NONE && sc != SETTING_RUN) {
 			IMPROPER_USAGE;
 		}
 
@@ -476,11 +520,20 @@ int main(int argc, char* const argv[]) {
 
 	case MAIN_ACTION_RUN:
 
-		if (tra_setting) {
+		if (sc != SETTING_NONE && sc != SETTING_RUN) {
 			IMPROPER_USAGE;
 		}
 
 		ret = run_action(infile, &settings);
+		break;
+
+	case MAIN_ACTION_DISASSEMBLE:
+
+		if (sc != SETTING_NONE && sc != SETTING_DISASSEMBLE) {
+			IMPROPER_USAGE;
+		}
+
+		ret = disassemble_file(infile, &settings);
 		break;
 
 	case MAIN_ACTION_NONE:

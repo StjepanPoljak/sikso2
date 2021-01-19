@@ -588,7 +588,7 @@ static int handle_arg(translator_t* trans, struct instr_el_t* new_instr,
 		set_new_instr_arg(match_buff);
 
 		if (ret != TRANS_ERROR_MAYBE_LABEL) {
-			mode = (new_instr->arg & 0xFF00) 
+			mode = (new_instr->arg & 0xFF00)
 			     ? MODE_ABSOLUTE : MODE_ZERO_PAGE; }
 		else {
 			mode = MODE_ABSOLUTE;
@@ -927,4 +927,223 @@ exit_translator:
 	translator_deinit(&trans);
 
 	return ret;
+}
+
+typedef union {
+	uint16_t arg;
+	uint8_t mem[2];
+} arg_conv_t;
+
+struct disasm_list_t {
+	char *line;
+	struct disasm_list_t* next;
+};
+
+/* NOTE: pass mode with 0xF mask here */
+static int add_string(struct disasm_list_t** head,
+		      struct disasm_list_t** last,
+		      disasm_mode_t dmode,
+		      const char name[4], uint16_t arg,
+		      const uint8_t* bytes, uint16_t instr_len,
+		      instr_mode_t mode) {
+
+	struct disasm_list_t* newd;
+	int ret;
+	char instr_part[MAX_LINE_SIZE] = { 0 };
+	char mc_part[9] = { 0 };
+	char arg_part[5] = { 0 };
+	unsigned int size;
+
+	newd = NULL;
+	ret = 0;
+
+	switch (instr_len) {
+	case 1:
+		sprintf(mc_part, "%.2x", bytes[0]);
+		break;
+	case 2:
+		sprintf(mc_part, "%.2x %.2x", bytes[0], bytes[1]);
+		sprintf(arg_part, "%.2x", (uint8_t)arg);
+		break;
+	case 3:
+		sprintf(mc_part, "%.2x %.2x %.2x",
+			bytes[0], bytes[1], bytes[2]);
+		sprintf(arg_part, "%.4x", arg);
+		break;
+	default:
+		/* properly handled in disassemble() */
+		break;
+	}
+
+	switch (mode) {
+	case MODE_ZERO_PAGE_X:
+	case MODE_ZERO_PAGE_Y:
+	case MODE_ABSOLUTE_X:
+	case MODE_ABSOLUTE_Y:
+		sprintf(instr_part, "%s $%s, %c", name, arg_part,
+		       (mode == MODE_ZERO_PAGE_X
+		     || mode == MODE_ABSOLUTE_X)
+		      ? 'X' : 'Y');
+		break;
+	case MODE_INDIRECT_X:
+		sprintf(instr_part, "%s ($%s, X)", name, arg_part);
+		break;
+	case MODE_INDIRECT_Y:
+		sprintf(instr_part, "%s ($%s), Y", name, arg_part);
+		break;
+	case MODE_INDIRECT:
+		sprintf(instr_part, "%s ($%s)", name, arg_part);
+		break;
+	case MODE_ACCUMULATOR:
+		sprintf(instr_part, "%s A", name);
+		break;
+	case MODE_IMMEDIATE:
+		sprintf(instr_part, "%s #$%s", name, arg_part);
+		break;
+	default:
+		if (instr_len > 1)
+			sprintf(instr_part, "%s $%s", name, arg_part);
+		else
+			sprintf(instr_part, "%s", name);
+		break;
+	}
+
+	newd = malloc(sizeof(*newd));
+	if (!newd) {
+		logt_err("Could not allocate memory.");
+		return -1;
+	}
+
+	newd->next = NULL;
+	newd->line = NULL;
+
+	switch (dmode) {
+	case DISASM_SIMPLE:
+		print_to_str(&(newd->line), &size, "%s", instr_part);
+		break;
+	case DISASM_PRETTY:
+		print_to_str(&(newd->line), &size, "%-8s\t%s", mc_part, instr_part);
+		break;
+	default:
+		logt_err("Invalid disassembly mode.");
+		return -1;
+	}
+
+	if (!(newd->line)) {
+		logt_err("Line was not written properly.");
+		free(newd);
+		return -1;
+	}
+
+	if (!(*last)) {
+		*head = newd;
+		*last = newd;
+	}
+	else {
+		(*last)->next = newd;
+		*last = newd;
+	}
+
+	return ret;
+}
+
+static void free_disasm(struct disasm_list_t* curr) {
+	struct disasm_list_t* tmp;
+
+	tmp = curr;
+	free(tmp);
+
+	return;
+}
+static void free_disasm_list(struct disasm_list_t* head) {
+	struct disasm_list_t* curr;
+	struct disasm_list_t* temp;
+
+	curr = head;
+
+	while (curr) {
+		temp = curr->next;
+		free(curr->line);
+		free_disasm(curr);
+		curr = temp;
+	}
+
+	return;
+}
+
+int disassemble(const char* infile, instr_map_t* map,
+		disasm_mode_t disasm_mode) {
+	uint8_t* bytes;
+	unsigned int len;
+	unsigned int i, j;
+	uint8_t opc;
+	char name[4];
+	uint16_t arg;
+	struct disasm_list_t* head;
+	struct disasm_list_t* last;
+	int ret;
+
+	bytes = load_file(infile, &len);
+	if (!bytes) {
+		logt_err("Could not open file %s.", infile);
+		return -1;
+	}
+
+	i = 0;
+	name[3] = 0;
+	head = NULL;
+	last = NULL;
+
+	while (i < len) {
+		j = i;
+		opc = bytes[i++];
+
+		if (!map[opc].instr) {
+			logt_err("Invalid opcode: %.2x", opc);
+			free(bytes);
+			return -1;
+		}
+
+		memcpy(name, map[opc].instr->name, 3);
+		switch (map[opc].subinstr->length) {
+		case 1:
+			break;
+		case 2:
+			arg = (uint16_t)bytes[i++];
+			break;
+		case 3:
+			arg = ((arg_conv_t*)(&(bytes[i])))->arg;
+			i += 2;
+			break;
+		default:
+			logt_err("Invalid length (%u) for %s (0x%.2x).",
+				 map[opc].subinstr->length, name, opc);
+			free(bytes);
+			return -1;
+		}
+
+		ret = add_string(&head, &last, disasm_mode,
+				 name, arg, &(bytes[j]),
+				 map[opc].subinstr->length,
+				 map[opc].subinstr->mode & 0xF);
+		if (ret)
+			goto exit_disasm;
+	}
+
+	last = head;
+
+	while (last) {
+		printf("%s\n", last->line);
+		last = last->next;
+	}
+
+exit_disasm:
+
+	if (head)
+		free_disasm_list(head);
+
+	if (bytes)
+		free(bytes);
+
+	return 0;
 }

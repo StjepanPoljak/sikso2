@@ -35,6 +35,7 @@ void init_settings(settings_t* settings) {
 	settings->mrhead = NULL;
 	settings->mimage = NULL;
 	settings->mbhead = NULL;
+	settings->dmode = DISASM_SIMPLE;
 
 	return;
 }
@@ -116,5 +117,3 @@ uint8_t* load_file(const char* infile, unsigned int* len) {
 
 	return out;
 }
-
-

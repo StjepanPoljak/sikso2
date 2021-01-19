@@ -50,6 +50,16 @@ The assembler follows a rather simple syntax and is almost fully functional. You
 
 This will create a binary that is executable on a 6502 CPU.
 
+### Disassembly
+
+You can also do the opposite of translation and disassemble the 6502 binary file, with:
+
+```shell
+./sikso2 -D a.out
+```
+
+If you want to print opcodes along with the instructions, you can use an additional `-p` switch.
+
 ## Run
 
 ### Run binary
