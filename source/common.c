@@ -117,3 +117,21 @@ uint8_t* load_file(const char* infile, unsigned int* len) {
 
 	return out;
 }
+
+int appendc(char** str, int* last, int* size, char c) {
+
+	if (!(*str))
+		return -1;
+
+	if (*size < (*last) + 1) {
+		*size *= 2;
+		*str = realloc(*str, sizeof(**str) * (*size));
+		if (!(*str))
+			return -2;
+	}
+
+	(*str)[(*last)++] = c;
+
+	return 0;
+}
+

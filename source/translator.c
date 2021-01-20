@@ -12,7 +12,7 @@
 
 #define logt_err(FMT, ...) log_err(TSIG, FMT, ## __VA_ARGS__)
 
-#define MAX_LINE_SIZE 80
+#define MIN_LINE_SIZE 16
 #define MAX_INSTR_LENGTH 3
 #define PMATCH_SIZE 3
 
@@ -58,22 +58,23 @@
 		} \
 	} while (0)
 
-#define get_pmatch_to(buff, match) \
-	do { \
-		i = 0; \
-		while ((i < pmatch[match].rm_eo - pmatch[match].rm_so)) { \
-			buff[i] = str[i + pmatch[match].rm_so]; \
-			i++; \
-		} \
-	} while (0)
+#define get_pmatch_to(buff, match) do { \
+	i = 0; \
+	ret = 0; \
+	while ((i < pmatch[match].rm_eo - pmatch[match].rm_so)) { \
+		ret = appendc(&buff, &i, &size, \
+			      str[i + pmatch[match].rm_so]); \
+		if (ret) break; \
+	} \
+	if (!ret) appendc(&buff, &i, &size, '\0'); \
+} while (0)
 
-#define clean_pmatch(buff, match) \
-	do { \
-		for (i = 0; i < pmatch[match].rm_eo - pmatch[match].rm_so; \
-			i++) { \
-			buff[i] = 0; \
-		} \
-	} while (0)
+#define check_pmatch(end_lbl) do { \
+	if (ret < 0) { \
+		ret = TRANS_ERROR_FAIL; \
+		goto end_lbl; \
+	} \
+} while(0)
 
 #define REGEXEC(REG) \
 	ret = regexec(&(trans->REG), str, PMATCH_SIZE, pmatch, 0); \
@@ -104,7 +105,7 @@ struct instr_el_t {
 };
 
 struct lbl_node_t {
-	char label[MAX_LINE_SIZE];
+	char *label;
 	unsigned int addr;
 	struct lbl_node_t* left;
 	struct lbl_node_t* right;
@@ -172,17 +173,12 @@ static int translator_init(translator_t* trans) {
 
 /* ========= label operations ========= */
 
-static void lbl_init(struct lbl_node_t* lbl, const char name[MAX_LINE_SIZE],
-		     unsigned int name_size, unsigned int addr) {
-	unsigned int i = 0;
+static void lbl_init(struct lbl_node_t* lbl, const char* name,
+		     unsigned int addr) {
 
-	for (i = 0; i < MAX_LINE_SIZE; i++) {
+	lbl->label = malloc(sizeof(*(lbl->label)) * (strlen(name) + 1));
 
-		if (i < name_size)
-			lbl->label[i] = name[i];
-		else
-			lbl->label[i] = 0;
-	}
+	strcpy(lbl->label, name);
 
 	lbl->left = NULL;
 	lbl->right = NULL;
@@ -196,25 +192,25 @@ static void free_lbl(struct lbl_node_t* lbl) {
 	struct lbl_node_t* temp_lbl;
 
 	temp_lbl = lbl;
+	free(temp_lbl->label);
 	free(temp_lbl);
 
 	return;
 }
 
-static bool add_lbl(translator_t* trans, const char name[MAX_LINE_SIZE],
-		    unsigned int name_size) {
+static bool add_lbl(translator_t* trans, const char* name) {
 	struct lbl_node_t* new_lbl;
 	struct lbl_node_t* curr;
 	int res;
 
 	new_lbl = malloc(sizeof(*new_lbl));
 
-	lbl_init(new_lbl, name, name_size, trans->curr_addr);
+	lbl_init(new_lbl, name, trans->curr_addr);
 
 	curr = trans->label_pool;
 
 	while (curr) {
-		res = strncmp(curr->label, new_lbl->label, name_size);
+		res = strcmp(curr->label, new_lbl->label);
 
 		if (res > 0) {
 
@@ -386,7 +382,7 @@ static void remove_pending_label(struct instr_el_t* iel) {
 }
 
 static int translate_instr(translator_t* trans, struct instr_el_t* iel,
-			    uint8_t mcode[MAX_INSTR_LENGTH]) {
+			   uint8_t mcode[MAX_INSTR_LENGTH]) {
 	int ret;
 
 	if (iel->label_pending) {
@@ -505,26 +501,40 @@ static int parse_arg(const char* str) {
 
 static int get_arg(translator_t* trans, const char* str) {
 	regmatch_t pmatch[PMATCH_SIZE];
-	unsigned int i;
-	int ret;
-	char match_buff[MAX_LINE_SIZE] = { 0 };
+	int ret, size, i;
+	char* match_buff;
 
 	ret = 0;
 	i = 0;
+	match_buff = NULL;
+	size = MIN_LINE_SIZE;
+
+	match_buff = malloc(sizeof(*match_buff) * size);
+	if (!match_buff) {
+		logt_err("Could not allocate memory");
+		ret = TRANS_ERROR_FAIL;
+		goto end_get_arg;
+	}
 
 	REGEXEC(adr_re) {
 		get_pmatch_to(match_buff, 1);
+		check_pmatch(end_get_arg);
 		ttrace("Got pmatch: %s", match_buff);
-		ret = parse_arg(match_buff);
-		if (ret < 0)
-			return TRANS_ERROR_FAIL;
-		ttrace("Got address: %.4x", ret);
-		clean_pmatch(match_buff, 1);
 
-		return ret;
+		ret = parse_arg(match_buff);
+		check_pmatch(end_get_arg);
+		ttrace("Got address: %.4x", ret);
+
+		goto end_get_arg;
 	}
 
-	return TRANS_ERROR_MAYBE_LABEL;
+	ret = TRANS_ERROR_MAYBE_LABEL;
+
+end_get_arg:
+	if (match_buff)
+		free(match_buff);
+
+	return ret;
 }
 
 #define set_new_instr_arg(buff) \
@@ -561,29 +571,38 @@ static int get_length_set_opcode(struct instr_el_t* new_instr,
 static int handle_arg(translator_t* trans, struct instr_el_t* new_instr,
 		      const char* str) {
 	regmatch_t pmatch[PMATCH_SIZE];
-	unsigned int i;
-	int ret;
-	char match_buff[MAX_LINE_SIZE] = { 0 };
+	int ret, size, i;
+	char* match_buff;
 	instr_mode_t mode;
 
 	ret = 0;
+	size = MIN_LINE_SIZE;
+	match_buff = NULL;
+
+	match_buff = malloc(sizeof(*match_buff) * size);
+	if (!match_buff) {
+		logt_err("Could not allocate memory.");
+		ret = TRANS_ERROR_FAIL;
+		goto end_handle_arg;
+	}
 
 	REGEXEC(imm_re) {
 		get_pmatch_to(match_buff, 1);
+		check_pmatch(end_handle_arg);
 		ttrace("Immediate: %s", match_buff);
+
 		ret = parse_arg(match_buff);
-		if (ret < 0)
-			return TRANS_ERROR_FAIL;
+		check_pmatch(end_handle_arg);
 		new_instr->arg = ret;
-		clean_pmatch(match_buff, 1);
 
 		ret = get_length_set_opcode(new_instr, MODE_IMMEDIATE);
 
-		return ret;
+		goto end_handle_arg;
 	}
 
 	REGEXEC(gen_re) {
 		get_pmatch_to(match_buff, 1);
+		check_pmatch(end_handle_arg);
 		ttrace("Zero page / Absolute: %s", match_buff);
 		set_new_instr_arg(match_buff);
 
@@ -595,19 +614,19 @@ static int handle_arg(translator_t* trans, struct instr_el_t* new_instr,
 			set_label_pending(new_instr, match_buff);
 		}
 
-		clean_pmatch(match_buff, 1);
 		ret = get_length_set_opcode(new_instr, mode);
 
-		return ret;
+		goto end_handle_arg;
 	}
 
 	REGEXEC(gxy_re) {
 		get_pmatch_to(match_buff, 1);
+		check_pmatch(end_handle_arg);
 		ttrace("Zero page / Absolute: %s", match_buff);
 		set_new_instr_arg(match_buff);
-		clean_pmatch(match_buff, 1);
 
 		get_pmatch_to(match_buff, 2);
+		check_pmatch(end_handle_arg);
 		ttrace("Register: %s", match_buff);
 		if (ret != TRANS_ERROR_MAYBE_LABEL)
 			mode = (new_instr->arg & 0xFF00)
@@ -624,40 +643,48 @@ static int handle_arg(translator_t* trans, struct instr_el_t* new_instr,
 			set_label_pending(new_instr, match_buff);
 		}
 
-		clean_pmatch(match_buff, 2);
 		ret = get_length_set_opcode(new_instr, mode);
 
-		return ret;
+		goto end_handle_arg;
 	}
 
 	REGEXEC(inx_re) {
 		get_pmatch_to(match_buff, 1);
+		check_pmatch(end_handle_arg);
 		ttrace("Indirect X: %s", match_buff);
+
 		set_new_instr_arg(match_buff);
 		mode = MODE_INDIRECT_X;
 		if (ret == TRANS_ERROR_MAYBE_LABEL)
 			set_label_pending(new_instr, match_buff);
-		clean_pmatch(match_buff, 1);
 
 		ret = get_length_set_opcode(new_instr, mode);
 
-		return ret;
+		goto end_handle_arg;
 	}
 
 	REGEXEC(iny_re) {
 		get_pmatch_to(match_buff, 1);
+		check_pmatch(end_handle_arg);
 		ttrace("Indirect Y: %s", match_buff);
+
 		set_new_instr_arg(match_buff);
 		mode = MODE_INDIRECT_Y;
 		if (ret == TRANS_ERROR_MAYBE_LABEL)
 			set_label_pending(new_instr, match_buff);
-		clean_pmatch(match_buff, 1);
 		ret = get_length_set_opcode(new_instr, mode);
 
-		return ret;
+		goto end_handle_arg;
 	}
 
-	return -1;
+	ret = -1;
+
+end_handle_arg:
+
+	if (match_buff)
+		free(match_buff);
+
+	return ret;
 }
 
 /* ========= instruction / line handling ========= */
@@ -676,83 +703,97 @@ static void update_addr_and_length(translator_t* trans,
 
 static int handle_line(translator_t* trans, const char* str) {
 	regmatch_t pmatch[PMATCH_SIZE];
-	unsigned int i;
-	int ret;
+	int ret, i, size;
 	struct instr_el_t* new_instr = NULL;
-	char match_buff[MAX_LINE_SIZE] = { 0 };
+	char* match_buff;
 
 	ret = 0;
+	i = 0;
+	size = MIN_LINE_SIZE;
+	match_buff = NULL;
+
+	match_buff = malloc(sizeof(*match_buff) * size);
+	if (!match_buff) {
+		logt_err("Could not allocate memory.");
+		ret = TRANS_ERROR_FAIL;
+		goto end_handle_line;
+	}
 
 	ttracei("Parsing line \"%s\"", str);
 
 	REGEXEC(emp_re) {
 		ttrace("Empty line.");
 
-		return ret;
+		goto end_handle_line;
 	}
 
 	REGEXEC(lbe_re) {
 		get_pmatch_to(match_buff, 1);
+		check_pmatch(end_handle_line);
 		ttrace("Empty label %s (%ld)", match_buff,
 		       strlen(match_buff));
-		add_lbl(trans, match_buff, strlen(match_buff));
-		clean_pmatch(match_buff, 1);
+		add_lbl(trans, match_buff);
 
-		return ret;
+		goto end_handle_line;
 	}
 
 	new_instr = add_empty_instr(trans);
 
 	REGEXEC(acc_re) {
 		get_pmatch_to(match_buff, 1);
+		check_pmatch(end_handle_line);
 		ttrace("Accumulator operator: %s", match_buff);
 		set_instr_name(new_instr, match_buff);
-		clean_pmatch(match_buff, 1);
 
 		ret = get_length_set_opcode(new_instr, MODE_ACCUMULATOR);
-		if (ret < 0)
-			return ret;
+		check_pmatch(end_handle_line);
 		update_addr_and_length(trans, new_instr, ret);
 
-		return ret;
+		goto end_handle_line;
 	}
 
 	REGEXEC(cin_re) {
 		get_pmatch_to(match_buff, 1);
+		check_pmatch(end_handle_line);
 		ttrace("Complex instruction: %s", match_buff);
 		set_instr_name(new_instr, match_buff);
-		clean_pmatch(match_buff, 1);
 
 		get_pmatch_to(match_buff, 2);
+		check_pmatch(end_handle_line);
 		ret = handle_arg(trans, new_instr, match_buff);
 		if (new_instr->label_pending) {
 			ttrace("Is %s a label?", match_buff);
 		}
 		else if (ret == TRANS_ERROR_FAIL) {
-			return ret;
+			goto end_handle_line;
 		}
-		clean_pmatch(match_buff, 2);
 
 		update_addr_and_length(trans, new_instr, ret);
 
-		return ret;
+		goto end_handle_line;
 	}
 
 	REGEXEC(sin_re) {
 		get_pmatch_to(match_buff, 1);
+		check_pmatch(end_handle_line);
 		ttrace("Simple instruction: %s", match_buff);
 		set_instr_name(new_instr, match_buff);
-		clean_pmatch(match_buff, 1);
 
 		ret = get_length_set_opcode(new_instr, 0);
-		if (ret < 0)
-			return ret;
+		check_pmatch(end_handle_line);
 		update_addr_and_length(trans, new_instr, ret);
 
-		return ret;
+		goto end_handle_line;
 	}
 
-	return -1;
+	ret = -1;
+
+end_handle_line:
+
+	if (match_buff)
+		free(match_buff);
+
+	return ret;
 }
 
 /* ========= debug functions ========= */
@@ -818,10 +859,10 @@ int translate(const char* infile, unsigned int load_addr,
 	      int(*op)(unsigned int, const uint8_t*, void*),
 	      void *data) {
 	translator_t trans;
-	int ret, curr, last, i, line;
+	int ret, curr, last, line, size;
 	bool reading, entered_comment, started_newl;
 	FILE* f;
-	char line_buffer[MAX_LINE_SIZE] = { 0 };
+	char *line_buffer = NULL;
 	uint8_t *outdata;
 
 	if (!op) {
@@ -852,6 +893,14 @@ int translate(const char* infile, unsigned int load_addr,
 
 	reading = true;
 	line = 0;
+	size = MIN_LINE_SIZE;
+	line_buffer = NULL;
+	line_buffer = malloc(sizeof(*line_buffer) * size);
+	if (!line_buffer) {
+		logt_err("Could not allocate memory.");
+		ret = TRANS_ERROR_FAIL;
+		goto exit_translator;
+	}
 
 	while (reading) {
 
@@ -881,33 +930,37 @@ int translate(const char* infile, unsigned int load_addr,
 			if (curr == ';')
 				entered_comment = true;
 
-			if (!entered_comment && last >= MAX_LINE_SIZE) {
-				logt_err("Line buffer too small.");
-				ret = -1;
+			if ((!entered_comment) && curr != '\n' && curr != EOF) {
+				ret = appendc(&line_buffer, &last, &size, curr);
+				if (ret) {
+					logt_err("Error appending char.");
+					ret = TRANS_ERROR_FAIL;
+					goto exit_translator;
+				}
 
-				goto exit_translator;
 			}
-
-			if ((!entered_comment) && curr != '\n' && curr != EOF)
-				line_buffer[last++] = curr;
 		}
 
 		line++;
 
 		if (last <= 1)
-			goto cont;
+			continue;
+
+		ret = appendc(&line_buffer, &last, &size, '\0');
+		if (ret) {
+			logt_err("Error appending char.");
+			ret = TRANS_ERROR_FAIL;
+			goto exit_translator;
+		}
 
 		ret = handle_line(&trans, line_buffer);
 
 		if (ret < 0) {
 			logt_err("Syntax error at line %d: %s",
 				 line, line_buffer);
-
+			ret = TRANS_ERROR_FAIL;
 			goto exit_translator;
 		}
-cont:
-		for (i = 0; i <= last; i++)
-			line_buffer[i] = 0;
 	}
 
 #ifdef TRANSLATOR_TRACE
@@ -921,6 +974,9 @@ cont:
 	free(outdata);
 
 exit_translator:
+
+	if (line_buffer)
+		free(line_buffer);
 
 	fclose(f);
 
@@ -949,13 +1005,21 @@ static int add_string(struct disasm_list_t** head,
 
 	struct disasm_list_t* newd;
 	int ret;
-	char instr_part[MAX_LINE_SIZE] = { 0 };
+	char* instr_part;
 	char mc_part[9] = { 0 };
 	char arg_part[5] = { 0 };
 	unsigned int size;
 
 	newd = NULL;
 	ret = 0;
+	instr_part = NULL;
+	size = MIN_LINE_SIZE;
+
+	instr_part = malloc(sizeof(*instr_part) * size);
+	if (!instr_part) {
+		logt_err("Could not allocate memory.");
+		return TRANS_ERROR_FAIL;
+	}
 
 	switch (instr_len) {
 	case 1:
@@ -980,37 +1044,38 @@ static int add_string(struct disasm_list_t** head,
 	case MODE_ZERO_PAGE_Y:
 	case MODE_ABSOLUTE_X:
 	case MODE_ABSOLUTE_Y:
-		sprintf(instr_part, "%s $%s, %c", name, arg_part,
+		print_to_str(&instr_part, &size, "%s $%s, %c", name, arg_part,
 		       (mode == MODE_ZERO_PAGE_X
 		     || mode == MODE_ABSOLUTE_X)
 		      ? 'X' : 'Y');
 		break;
 	case MODE_INDIRECT_X:
-		sprintf(instr_part, "%s ($%s, X)", name, arg_part);
+		print_to_str(&instr_part, &size, "%s ($%s, X)", name, arg_part);
 		break;
 	case MODE_INDIRECT_Y:
-		sprintf(instr_part, "%s ($%s), Y", name, arg_part);
+		print_to_str(&instr_part, &size, "%s ($%s), Y", name, arg_part);
 		break;
 	case MODE_INDIRECT:
-		sprintf(instr_part, "%s ($%s)", name, arg_part);
+		print_to_str(&instr_part, &size, "%s ($%s)", name, arg_part);
 		break;
 	case MODE_ACCUMULATOR:
-		sprintf(instr_part, "%s A", name);
+		print_to_str(&instr_part, &size, "%s A", name);
 		break;
 	case MODE_IMMEDIATE:
-		sprintf(instr_part, "%s #$%s", name, arg_part);
+		print_to_str(&instr_part, &size, "%s #$%s", name, arg_part);
 		break;
 	default:
 		if (instr_len > 1)
-			sprintf(instr_part, "%s $%s", name, arg_part);
+			print_to_str(&instr_part, &size, "%s $%s", name, arg_part);
 		else
-			sprintf(instr_part, "%s", name);
+			print_to_str(&instr_part, &size, "%s", name);
 		break;
 	}
 
 	newd = malloc(sizeof(*newd));
 	if (!newd) {
 		logt_err("Could not allocate memory.");
+		free(instr_part);
 		return -1;
 	}
 
@@ -1028,6 +1093,8 @@ static int add_string(struct disasm_list_t** head,
 		logt_err("Invalid disassembly mode.");
 		return -1;
 	}
+
+	free(instr_part);
 
 	if (!(newd->line)) {
 		logt_err("Line was not written properly.");

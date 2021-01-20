@@ -54,5 +54,7 @@ bool is_hex(const char* str);
 void print_hex(const uint8_t* mem, unsigned int len, unsigned int offset);
 int parse_str(const char* str, int base, void(*on_err)(int));
 uint8_t* load_file(const char* infile, unsigned int* len);
+int appendc(char** str, int* last, int* size, char c);
+
 
 #endif

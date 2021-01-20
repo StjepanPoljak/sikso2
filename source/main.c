@@ -156,7 +156,7 @@ static int export_binary(unsigned int len, const uint8_t* out, void* data) {
 		return -1;
 	}
 	else
-		mtracei("(i) Successfully written binary to %s.",
+		mtracei("Successfully written binary to %s.",
 			td->outfile);
 
 	fclose(f);

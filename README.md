@@ -1,5 +1,7 @@
 # sikso2
 
+[![Build Status](https://travis-ci.org/StjepanPoljak/sikso2.svg?branch=main)](https://travis-ci.org/StjepanPoljak/sikso2)
+
 ## Introduction
 
 Sikso2, a 6502 CPU translator and emulator, still in development.
@@ -15,7 +17,7 @@ DEFAULT_RAM_SIZE=8192
 DEFAULT_DUMP_MEM_COLS=5
 ```
 
-You can, of course, change these to your preference. Note that some of them are still not fully functional.
+You can, of course, change these to your preference.
 
 Debug and trace options that can be removed include:
 
@@ -28,7 +30,7 @@ CLOCK_TRACE
 SAFEGUARD=1000
 ```
 
-Safeguard is a convenient option to avoid an infinite loop when running the device. In the future, this will be replaced by a `SIGINT` trap that will do a proper device cleanup.
+Note: `SAFEGUARD` is a convenient debug option to avoid an infinite loop when running the device.
 
 Note: You can turn off any of these options by either deleting them or, preferrably, commenting them out with `#`, i.e. the hashtag.
 
